@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from .bom import BomRow
 from .catalog import PartCatalog
+from .ldraw import PlacedPart
 from .checks import Finding
 from .rebrickable import Client
 
@@ -150,15 +151,23 @@ def check(
     return results
 
 
-def findings(results: list[Availability]) -> list[Finding]:
+def findings(
+    results: list[Availability], pieces: list[PlacedPart] | None = None
+) -> list[Finding]:
     out: list[Finding] = []
     for a in results:
         what = f"{a.row.quantity}x {a.row.part}"
+        used = tuple(
+            p for p in pieces or () if (p.part, p.colour) == (a.row.part, a.row.colour)
+        )
         if a.status == NOT_MADE:
             alt = f" It was made in: {', '.join(a.alternatives)}." if a.alternatives else ""
             out.append(Finding(
                 "error", "availability",
                 f"{what} was never produced in {a.colour_name or a.row.colour}.{alt}",
+                "Recolour these pieces to a colour the part was made in, or swap "
+                "them for a similar part that exists in the wanted colour.",
+                used,
             ))
         elif a.status == PART_UNKNOWN:
             out.append(Finding(
@@ -169,6 +178,7 @@ def findings(results: list[Availability]) -> list[Finding]:
             out.append(Finding(
                 "warning", "availability",
                 f"{what}: LDraw colour {a.row.colour} is unknown to Rebrickable",
+                "Use a standard LDraw colour code for these pieces.", used,
             ))
     rare = [a for a in results if a.status == RARE]
     if rare:

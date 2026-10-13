@@ -99,6 +99,8 @@ class PlacedPart:
     matrix: Matrix
     path: tuple[str, ...]  # chain of submodels this piece sits inside
     step: int  # step number within its own submodel (1-based)
+    label: str = ""  # the "0 // ..." comment written just above it, if any
+    local: Vec = (0.0, 0.0, 0.0)  # position inside its own submodel
 
     def to_line(self) -> str:
         return Ref(self.colour, self.pos, self.matrix, f"{self.part}.dat").to_line()
@@ -190,13 +192,17 @@ def flatten(doc: Document) -> tuple[list[PlacedPart], list[str]]:
 
     def walk(model: Model, pos: Vec, matrix: Matrix, colour: int, path: tuple[str, ...]):
         step = 1
+        label = ""
         for line in model.lines:
             if line.is_step:
                 step += 1
                 continue
             ref = line.ref
             if ref is None:
+                if line.raw.startswith("0 //"):
+                    label = line.raw[4:].strip()
                 continue
+            this_label, label = label, ""
             world_pos = tuple(p + o for p, o in zip(pos, mat_vec(matrix, ref.pos)))
             world_mat = mat_mul(matrix, ref.matrix)
             ref_colour = colour if ref.colour == INHERIT_COLOUR else ref.colour
@@ -207,9 +213,10 @@ def flatten(doc: Document) -> tuple[list[PlacedPart], list[str]]:
                     continue
                 walk(doc.models[key], world_pos, world_mat, ref_colour, path + (key,))
             elif is_part_file(key):
-                pieces.append(
-                    PlacedPart(key[:-4], ref_colour, world_pos, world_mat, path, step)
-                )
+                pieces.append(PlacedPart(
+                    key[:-4], ref_colour, world_pos, world_mat, path, step,
+                    this_label, ref.pos,
+                ))
             else:
                 problems.append(
                     f"'{ref.target}' is used in {model.name} but is not defined in the file"

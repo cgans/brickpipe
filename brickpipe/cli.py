@@ -5,12 +5,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import availability, bom, checks, ldraw, rebrickable, steps
+from . import availability, bom, checks, feedback, ldraw, rebrickable, steps
 from .catalog import PartCatalog, load_colours
 
 
 def build_report(
-    name, pieces, rows, findings, stepped, skipped, catalog_used, availability_note=None
+    name, pieces, rows, findings, stepped, skipped, catalog_used,
+    availability_note=None, has_feedback=False,
 ) -> str:
     errors = [f for f in findings if f.level == "error"]
     warnings = [f for f in findings if f.level == "warning"]
@@ -52,6 +53,10 @@ def build_report(
     ]
     if availability_note and "availability.csv" in availability_note:
         lines.append("- `availability.csv`: every part and colour with its status")
+    if has_feedback:
+        lines.append(
+            "- `feedback.md`: repair request to give to the agent that designed the model"
+        )
     lines.append("")
     return "\n".join(lines)
 
@@ -102,7 +107,13 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
         return 1
     rows = bom.build(pieces)
 
-    findings = [checks.Finding("error", "structure", p) for p in problems]
+    findings = [
+        checks.Finding(
+            "error", "structure", p,
+            "Define the missing submodel in the file, or remove the reference to it.",
+        )
+        for p in problems
+    ]
     findings += checks.check_colours(pieces, colours)
     findings += checks.check_duplicates(pieces)
     if catalog:
@@ -133,7 +144,7 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
             ))
             availability_note = "Availability was not checked; see the warning below."
         else:
-            findings += availability.findings(results)
+            findings += availability.findings(results, pieces)
             overrides = availability.bricklink_overrides(results)
             (out / "availability.csv").write_text(
                 availability.to_csv(results), encoding="utf-8"
@@ -149,8 +160,15 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
     (out / "bricklink_wanted.xml").write_text(xml, encoding="utf-8")
     (out / "flat.ldr").write_text(bom.to_flat_ldr(pieces, name), encoding="utf-8")
     (out / "instructions.mpd").write_text(ldraw.dump(doc), encoding="utf-8")
+    request = feedback.build(name, len(pieces), findings, colours)
+    feedback_path = out / "feedback.md"
+    if request:
+        feedback_path.write_text(request, encoding="utf-8")
+    elif feedback_path.exists():
+        feedback_path.unlink()  # an earlier run's request no longer applies
     report = build_report(
-        name, pieces, rows, findings, stepped, skipped, bool(catalog), availability_note
+        name, pieces, rows, findings, stepped, skipped, bool(catalog),
+        availability_note, bool(request),
     )
     (out / "report.md").write_text(report, encoding="utf-8")
 
@@ -159,6 +177,8 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
     print(f"{name}: {len(pieces)} pieces, {len(rows)} lots, "
           f"{errors} error(s), {warnings} warning(s)")
     print(f"Wrote {out}/")
+    if request:
+        print("feedback.md lists what the designing agent should repair.")
     return 1 if (args.strict and errors) else 0
 
 
