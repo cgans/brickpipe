@@ -1,0 +1,24 @@
+0 FILE garden-shed.ldr
+0 Small shed on a green base, with two identical side walls
+0 Name: garden-shed.ldr
+0 Author: brickpipe example
+0 // roof: red 4 x 8 plate across both walls
+1 4 0 -64 0 1 0 0 0 1 0 0 0 1 3035.dat
+0 // base: green 4 x 8 plate
+1 2 0 -8 0 1 0 0 0 1 0 0 0 1 3035.dat
+0 // left wall, takes its colour from here
+1 15 -60 -8 0 0 0 1 0 1 0 -1 0 0 shed-wall.ldr
+0 // right wall
+1 15 60 -8 0 0 0 1 0 1 0 -1 0 0 shed-wall.ldr
+0 // lamp: a yellow stud that is not attached to anything
+1 14 200 -120 0 1 0 0 0 1 0 0 0 1 4073.dat
+0 NOFILE
+0 FILE shed-wall.ldr
+0 Two 2 x 4 bricks stacked, colour inherited from the parent
+0 Name: shed-wall.ldr
+0 Author: brickpipe example
+0 // upper brick
+1 16 0 -48 0 1 0 0 0 1 0 0 0 1 3001.dat
+0 // lower brick
+1 16 0 -24 0 1 0 0 0 1 0 0 0 1 3001.dat
+0 NOFILE
