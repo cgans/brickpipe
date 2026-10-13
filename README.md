@@ -11,6 +11,7 @@ to actually build it:
 | `flat.ldr` | All pieces in one model with no submodels, for upload to Rebrickable or BrickLink |
 | `instructions.mpd` | The model with build steps of at most 8 pieces, ready for LPub3D |
 | `report.md` | Piece counts and every problem found |
+| `availability.csv` | With `--availability`: whether each part was ever made in that colour |
 
 Python 3.10 or newer. No third-party packages.
 
@@ -26,6 +27,31 @@ exists, better step ordering and the floating-piece check:
 ```
 python -m brickpipe model.mpd -o out/ --nova-db ../ldraw-nova/data/ldraw-info.db
 ```
+
+### Check that the parts exist in those colours
+
+```
+export REBRICKABLE_API_KEY=your-key
+python -m brickpipe model.mpd -o out/ --availability
+```
+
+The key is free: rebrickable.com > Account > Settings > API. Keep it in the
+environment, not in a file in this repository. It is sent only in the request
+header and is never written to the cache, the report or an error message.
+
+Each part and colour is looked up in Rebrickable's catalogue of official sets:
+
+- **not made in this colour** is reported as an error, with the colours the
+  part was made in.
+- **rare** means it appears in three sets or fewer, so expect it to be scarce.
+- The wanted list switches to BrickLink's own part and colour ids wherever
+  Rebrickable supplies them, in place of the bundled table.
+
+The first run on a model takes about one second per distinct part, because
+Rebrickable allows roughly one request per second. Responses are cached for 30
+days in `~/.cache/brickpipe/rebrickable` (change with `--cache-dir`), so later
+runs are instant. If the check cannot run, the report says so and everything
+else is still produced.
 
 Options: `--max-step-parts N` (default 8), `--keep-steps` to leave the model's
 steps untouched, `--strict` to exit with status 1 when an error is found.
@@ -76,10 +102,14 @@ Tests: `python -m unittest discover -s tests`
   nothing in the main structure.
 
 Not covered: whether touching pieces really clip together, whether the model
-stands up, and whether each part is sold in the chosen colour.
+stands up, and whether a part that exists is in stock or affordable today.
 
 ## Known limits
 
+- The availability check has only been tested against canned responses that
+  follow Rebrickable's API docs. Its first run against the live API is still
+  to be done.
+- Without `--availability`, the next two points apply.
 - `data/colours.csv` maps LDraw colour codes to BrickLink colour ids for the
   common colours. Check the colours in a wanted list before ordering. Colours
   not in the table are left out of the XML and listed in the report.
@@ -89,11 +119,9 @@ stands up, and whether each part is sold in the chosen colour.
 
 ## Next steps
 
-1. Colour availability: look each part and colour up in the Rebrickable API and
-   flag combinations that were never produced.
-2. Feed `report.md` back to the agent so it repairs its own model.
-3. Stud-level connectivity for ordinary bricks and plates.
-4. Price estimate per model.
+1. Feed `report.md` back to the agent so it repairs its own model.
+2. Stud-level connectivity for ordinary bricks and plates.
+3. Price estimate per model.
 
 ## Licence note
 
