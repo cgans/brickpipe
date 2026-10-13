@@ -10,10 +10,11 @@ permissions:
 
 jobs:
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.10", "3.13"]
     steps:
       - uses: actions/checkout@v4
@@ -24,3 +25,17 @@ jobs:
         run: python -m unittest discover -s tests -v
       - name: Run the pipeline on the example model
         run: python -m brickpipe examples/garden-shed.mpd -o out --strict
+      - name: Setup script parses and runs in Windows PowerShell
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          $errors = $null; $tokens = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path scripts\check-setup.ps1), [ref]$tokens, [ref]$errors)
+          if ($errors.Count) { $errors | ForEach-Object { Write-Host $_.Message }; exit 1 }
+          # The runner lacks Nova and LPub3D, so failures are expected here;
+          # this only proves the script runs to its summary line.
+          $out = powershell -ExecutionPolicy Bypass -File scripts\check-setup.ps1 | Out-String
+          Write-Host $out
+          if ($out -notmatch "item\(s\)|Everything is in place") { exit 1 }
+          exit 0

@@ -49,9 +49,14 @@ class PartCatalog:
         path = Path(db_path).resolve()
         if not path.is_file():
             raise FileNotFoundError(f"Nova database not found: {path}")
-        self._db = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        # as_uri() gives file:///C:/... on Windows, which a hand-built
+        # "file:C:\\..." string does not survive.
+        self._db = sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True)
         self._names: dict[str, str | None] = {}
         self._boxes: dict[str, BBox | None] = {}
+
+    def close(self) -> None:
+        self._db.close()
 
     def description(self, part: str) -> str | None:
         if part not in self._names:

@@ -75,6 +75,9 @@ Tests: `python -m unittest discover -s tests`
 
 ## End-to-end test run
 
+On Windows, follow [docs/testing-on-windows.md](docs/testing-on-windows.md),
+which adds a setup check and the Windows-specific commands.
+
 1. **Install LDraw Nova** (needs Git and Docker, about 5 GB of disk):
 
    ```
