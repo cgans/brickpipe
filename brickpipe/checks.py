@@ -40,6 +40,18 @@ def check_colours(pieces: list[PlacedPart], colours: dict[int, Colour]) -> list[
     return out
 
 
+def check_embedded(pieces: list[PlacedPart]) -> list[Finding]:
+    counts = Counter((p.embedded_as, p.part) for p in pieces if p.embedded_as)
+    return [
+        Finding(
+            "warning", "embedded",
+            f"{qty} piece(s) use a part definition carried inside the file "
+            f"({name}). Listed as part {part}; confirm that id before ordering.",
+        )
+        for (name, part), qty in sorted(counts.items())
+    ]
+
+
 def check_duplicates(pieces: list[PlacedPart]) -> list[Finding]:
     seen: Counter = Counter()
     for p in pieces:
@@ -79,7 +91,9 @@ def check_parts(pieces: list[PlacedPart], catalog: PartCatalog) -> list[Finding]
 
 def check_steps(doc: Document, max_parts: int) -> list[Finding]:
     out: list[Finding] = []
-    for model in doc.models.values():
+    for key, model in doc.models.items():
+        if key.endswith(".dat"):
+            continue  # a part definition, not something to build
         in_step = 0
         worst = 0
         for line in model.lines:

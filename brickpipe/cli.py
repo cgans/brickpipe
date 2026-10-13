@@ -88,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     findings = [checks.Finding("error", "structure", p) for p in problems]
     findings += checks.check_colours(pieces, colours)
     findings += checks.check_duplicates(pieces)
+    findings += checks.check_embedded(pieces)
     if catalog:
         findings += checks.check_parts(pieces, catalog)
         findings += checks.check_floating(pieces, catalog)
