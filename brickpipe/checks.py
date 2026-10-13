@@ -45,6 +45,18 @@ def check_colours(pieces: list[PlacedPart], colours: dict[int, Colour]) -> list[
     return out
 
 
+def check_embedded(pieces: list[PlacedPart]) -> list[Finding]:
+    counts = Counter((p.embedded_as, p.part) for p in pieces if p.embedded_as)
+    return [
+        Finding(
+            "warning", "embedded",
+            f"{qty} piece(s) use a part definition carried inside the file "
+            f"({name}). Listed as part {part}; confirm that id before ordering.",
+        )
+        for (name, part), qty in sorted(counts.items())
+    ]
+
+
 def check_duplicates(pieces: list[PlacedPart]) -> list[Finding]:
     seen: dict[tuple, list[PlacedPart]] = defaultdict(list)
     for p in pieces:
@@ -89,7 +101,9 @@ def check_parts(pieces: list[PlacedPart], catalog: PartCatalog) -> list[Finding]
 
 def check_steps(doc: Document, max_parts: int) -> list[Finding]:
     out: list[Finding] = []
-    for model in doc.models.values():
+    for key, model in doc.models.items():
+        if key.endswith(".dat"):
+            continue  # a part definition, not something to build
         in_step = 0
         worst = 0
         for line in model.lines:
@@ -175,7 +189,9 @@ def check_floating(
             f"{tuple(round(v, 1) for v in sample.pos)}). "
             f"Nearest gap to the main structure, in LDraw units: {gap_text}.",
             "Move these pieces so they sit on or clip to the main structure, add "
-            "the pieces that should connect them, or remove them.",
+            "the pieces that should connect them, or remove them. This check "
+            "only tests whether bounding boxes touch, so if they are attached "
+            "by a connection that leaves a gap, say so and leave them.",
             tuple(pieces[i] for i in group),
         ))
     return out

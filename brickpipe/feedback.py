@@ -71,6 +71,15 @@ def section(title: str, items: list[Finding], start: int, colours) -> list[str]:
     return out
 
 
+def summary(errors: list[Finding], warnings: list[Finding]) -> str:
+    parts = []
+    if errors:
+        parts.append(f"{len(errors)} problem(s) make that impossible as drawn")
+    if warnings:
+        parts.append(f"{len(warnings)} problem(s) are likely to get in the way")
+    return " and ".join(parts) + ". Please repair them."
+
+
 def build(
     name: str,
     piece_count: int,
@@ -88,9 +97,7 @@ def build(
         f"# Repair request: {name}",
         "",
         f"The model `{name}` ({piece_count} pieces) was checked to see whether it "
-        "can be bought and built with real bricks. "
-        f"{len(errors)} problem(s) make that impossible as drawn and "
-        f"{len(warnings)} more are likely to. Please repair them.",
+        "can be bought and built with real bricks. " + summary(errors, warnings),
         "",
         "## How to work",
         "",

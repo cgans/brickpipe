@@ -12,6 +12,7 @@ to actually build it:
 | `instructions.mpd` | The model with build steps of at most 8 pieces, ready for LPub3D |
 | `report.md` | Piece counts and every problem found |
 | `availability.csv` | With `--availability`: whether each part was ever made in that colour |
+| `feedback.md` | When there is something to fix: a repair request for the agent that designed the model |
 
 Python 3.10 or newer. No third-party packages.
 
@@ -52,6 +53,20 @@ Rebrickable allows roughly one request per second. Responses are cached for 30
 days in `~/.cache/brickpipe/rebrickable` (change with `--cache-dir`), so later
 runs are instant. If the check cannot run, the report says so and everything
 else is still produced.
+
+### Send the problems back to the agent
+
+When a run finds problems the designing agent can fix, it writes `feedback.md`.
+It lists only those problems, each with what to change and where: the
+submodel, the part and colour, the position inside that submodel, and the
+comment the agent wrote above the line.
+
+1. Open the Nova chat that produced the model.
+2. Attach `feedback.md` (or paste its contents) and send it.
+3. Run brickpipe again on the regenerated `.mpd`.
+
+Repeat until no `feedback.md` is written. Problems only you can act on, such
+as rare parts or ids to confirm, stay in `report.md` and are not sent.
 
 Options: `--max-step-parts N` (default 8), `--keep-steps` to leave the model's
 steps untouched, `--strict` to exit with status 1 when an error is found.
@@ -96,6 +111,8 @@ Tests: `python -m unittest discover -s tests`
 - **Structure:** submodels that are referenced but missing, and submodel loops.
 - **Colour:** pieces left with no real colour, and colours missing from the table.
 - **Duplicates:** two copies of a part in exactly the same place.
+- **Embedded parts:** parts whose definition is carried inside the file, with
+  the id they were listed under so you can confirm it.
 - **Parts** (needs `--nova-db`): ids not in the LDraw library, old ids that have
   been renamed, and drawing geometry used as if it were a piece.
 - **Floating** (needs `--nova-db`): groups of pieces whose bounding boxes touch
@@ -119,7 +136,8 @@ stands up, and whether a part that exists is in stock or affordable today.
 
 ## Next steps
 
-1. Feed `report.md` back to the agent so it repairs its own model.
+1. Send `feedback.md` to Nova and fetch the repaired model automatically,
+   looping until the model is clean.
 2. Stud-level connectivity for ordinary bricks and plates.
 3. Price estimate per model.
 

@@ -99,6 +99,7 @@ class PlacedPart:
     matrix: Matrix
     path: tuple[str, ...]  # chain of submodels this piece sits inside
     step: int  # step number within its own submodel (1-based)
+    embedded_as: str = ""  # name of the part definition carried in the file, if any
     label: str = ""  # the "0 // ..." comment written just above it, if any
     local: Vec = (0.0, 0.0, 0.0)  # position inside its own submodel
 
@@ -185,6 +186,16 @@ def is_part_file(key: str) -> bool:
     return key.endswith(".dat")
 
 
+def embedded_part_id(key: str) -> str:
+    """Best guess at the real part id of a part definition carried in the file.
+
+    A model can include its own copy of a part's geometry as a "0 FILE x.dat"
+    block, usually for parts missing from the official library. Nova names
+    these "<prefix>---<part id>.dat"; other tools just use "<part id>.dat".
+    """
+    return key[:-4].rsplit("---", 1)[-1]
+
+
 def flatten(doc: Document) -> tuple[list[PlacedPart], list[str]]:
     """Resolve every submodel and return (pieces, problems)."""
     pieces: list[PlacedPart] = []
@@ -207,16 +218,21 @@ def flatten(doc: Document) -> tuple[list[PlacedPart], list[str]]:
             world_mat = mat_mul(matrix, ref.matrix)
             ref_colour = colour if ref.colour == INHERIT_COLOUR else ref.colour
             key = ref.key
-            if key in doc.models:
+            if is_part_file(key):
+                # One physical piece, whether its geometry comes from the part
+                # library or from a definition carried inside this file. The
+                # definition is never walked: its lines are drawing geometry.
+                embedded = key in doc.models
+                pieces.append(PlacedPart(
+                    embedded_part_id(key) if embedded else key[:-4],
+                    ref_colour, world_pos, world_mat, path, step,
+                    key if embedded else "", this_label, ref.pos,
+                ))
+            elif key in doc.models:
                 if key in path:
                     problems.append(f"Submodel loop: {' > '.join(path)} > {key}")
                     continue
                 walk(doc.models[key], world_pos, world_mat, ref_colour, path + (key,))
-            elif is_part_file(key):
-                pieces.append(PlacedPart(
-                    key[:-4], ref_colour, world_pos, world_mat, path, step,
-                    this_label, ref.pos,
-                ))
             else:
                 problems.append(
                     f"'{ref.target}' is used in {model.name} but is not defined in the file"
