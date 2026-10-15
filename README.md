@@ -45,6 +45,8 @@ Each part and colour is looked up in Rebrickable's catalogue of official sets:
 - **not made in this colour** is reported as an error, with the colours the
   part was made in.
 - **rare** means it appears in three sets or fewer, so expect it to be scarce.
+  The warning names the pieces and the part's commoner colours, and goes into
+  `feedback.md` as a "should fix" item.
 - The wanted list switches to BrickLink's own part and colour ids wherever
   Rebrickable supplies them, in place of the bundled table.
 

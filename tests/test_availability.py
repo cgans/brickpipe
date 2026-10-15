@@ -141,13 +141,20 @@ class AvailabilityTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertIn("3035 was never produced in Green", errors[0])
         self.assertIn("Black, White, Red", errors[0])
-        self.assertEqual(sum(1 for f in found if f.level == "warning"), 3)
+        warnings = [f.message for f in found if f.level == "warning"]
+        self.assertEqual(len(warnings), 3)
+        rare = next(m for m in warnings if "only 2 sets" in m)
+        self.assertIn("1x 3035 in Red", rare)
+        self.assertIn("Black, White", rare)
+        self.assertNotIn("Red,", rare.split("colours for this part:")[1])
 
     def test_csv_has_one_line_per_row(self):
         lines = list(csv.DictReader(io.StringIO(availability.to_csv(self.results))))
         self.assertEqual(len(lines), len(ROWS))
         self.assertEqual(lines[1]["status"], availability.NOT_MADE)
         self.assertEqual(lines[1]["made_in_instead"], "Black; White; Red")
+        self.assertEqual(lines[2]["status"], availability.RARE)
+        self.assertEqual(lines[2]["made_in_instead"], "Black; White")
 
     def test_wanted_list_uses_bricklink_ids(self):
         overrides = availability.bricklink_overrides(self.results)
