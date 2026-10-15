@@ -110,7 +110,8 @@ class Run:
 
 
 def round_dict(rnd: loop.Round) -> dict:
-    out = {"number": rnd.number, "model": rnd.model.name, "sent": rnd.sent, "error": rnd.error}
+    out = {"number": rnd.number, "model": rnd.model.name, "sent": rnd.sent, "error": rnd.error,
+           "sent_at": rnd.sent_at}
     if rnd.result:
         out.update(pieces=rnd.result.piece_count, lots=rnd.result.lot_count,
                    errors=rnd.result.errors, warnings=rnd.result.warnings,

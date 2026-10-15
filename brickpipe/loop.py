@@ -29,6 +29,7 @@ class Round:
     model: Path
     result: Result | None = None
     sent: bool = False
+    sent_at: float | None = None
     turn: nova.Turn | None = None
     error: str | None = None
 
@@ -101,6 +102,7 @@ def run(
             options={"mode": "agent", "permissions": "full" if approve_tools else "ask"},
         )
         rnd.sent = True
+        rnd.sent_at = sent_at
         log(f"Round {number}: sent feedback.md to the agent, waiting...")
         if on_round:
             on_round(rnd)

@@ -384,6 +384,13 @@ ul.history button:hover b { text-decoration: underline; }
     $('history').querySelectorAll('button').forEach(b => b.onclick = async () => show(await api('/api/runs/' + b.dataset.id)));
   }
   const title = r => r.request.prompt ? clip(r.request.prompt, 80) : (r.request.model_file || 'Newest model in ' + (r.request.chat_id || 'the latest chat'));
+  const duration = s => s < 60 ? Math.round(s) + ' s' : s < 3600 ? Math.floor(s / 60) + ' min ' + String(Math.round(s % 60)).padStart(2, '0') + ' s' : Math.floor(s / 3600) + ' h ' + Math.floor((s % 3600) / 60) + ' min';
+  const elapsed = run => {
+    const end = run.finished_at || Date.now() / 1000;
+    return (run.finished_at ? 'took ' : 'running for ') + duration(end - run.started_at);
+  };
+  setInterval(() => { if (current && !current.finished_at && current.rounds.some(r => r.sent && r.agent_seconds == null && !r.agent_error)) render(current); }, 1000);
+  setInterval(() => { if (current && !current.finished_at) $('runMeta').textContent = $('runMeta').textContent.replace(/running for [^·]+/, elapsed(current) + ' '); }, 1000);
   const clip = (text, n) => text.length <= n ? text : text.slice(0, n).replace(/\s+\S*$/, '') + '…';
   const when = t => new Date(t * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
   const summary = r => r.status === 'done' ? (r.result && r.result.clean ? 'clean' : 'stopped: ' + (r.result ? r.result.reason : '')) : r.status;
@@ -403,6 +410,7 @@ ul.history button:hover b { text-decoration: underline; }
       source.addEventListener('chat', e => { Object.assign(current, JSON.parse(e.data)); render(current); });
       source.addEventListener('round', e => {
         const d = JSON.parse(e.data);
+        if (d.sent && !d.agent_seconds && d.agent_error == null) d.sent_at = d.sent_at || Date.now() / 1000;
         current.rounds = current.rounds.filter(r => r.number !== d.number).concat([d]).sort((a, b) => a.number - b.number);
         render(current);
       });
@@ -420,7 +428,7 @@ ul.history button:hover b { text-decoration: underline; }
 
   function render(run) {
     $('runTitle').textContent = title(run);
-    $('runMeta').textContent = 'Started ' + when(run.started_at) + (run.request.availability ? '' : ' · availability not checked (no Rebrickable key)');
+    $('runMeta').textContent = 'Started ' + when(run.started_at) + ' · ' + elapsed(run) + (run.request.availability ? '' : ' · availability not checked (no Rebrickable key)');
     const live = !['done', 'failed', 'stopped'].includes(run.status);
     $('stopBtn').hidden = !live;
     $('chatLink').hidden = !run.chat_url; if (run.chat_url) $('chatLink').href = run.chat_url;
@@ -497,7 +505,7 @@ ul.history button:hover b { text-decoration: underline; }
   function agentCell(r, run) {
     if (r.agent_error) return '<span class="err">' + esc(r.agent_error) + '</span>';
     if (r.agent_seconds != null) return 'repaired in ' + r.agent_seconds + ' s';
-    if (r.sent) return 'working…';
+    if (r.sent) return 'working ' + duration((Date.now() / 1000) - (r.sent_at || run.started_at)) + '…';
     if (r.clean) return 'nothing to fix';
     return r.errors == null ? '' : 'not sent';
   }
