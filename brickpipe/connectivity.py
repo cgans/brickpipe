@@ -383,12 +383,60 @@ def analyse(
 
 # -- finding the libraries ---------------------------------------------------
 
+LDRAW_ZIP_URL = "https://library.ldraw.org/library/updates/complete.zip"
+
+
+def managed_library_dir() -> Path:
+    """Where brickpipe keeps a library it downloaded itself."""
+    import os
+
+    root = os.environ.get("LOCALAPPDATA") or os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(root) / "brickpipe" / "ldraw"
+
+
+def download_library(
+    target: Path | None = None,
+    progress=None,
+    url: str = LDRAW_ZIP_URL,
+    opener=None,
+) -> Path:
+    """Fetch complete.zip (about 90 MB, free, from ldraw.org) into the managed
+    folder and return the zip's path. `progress(done_bytes, total_bytes)` is
+    called as it goes. The download is written to a temporary name and
+    renamed only when it is complete, so a half-finished file is never used."""
+    import urllib.request
+
+    target = target or managed_library_dir()
+    target.mkdir(parents=True, exist_ok=True)
+    final = target / "complete.zip"
+    partial = target / "complete.zip.part"
+    request = urllib.request.Request(url, headers={"User-Agent": "brickpipe"})
+    open_ = opener or (lambda req: urllib.request.urlopen(req, timeout=60))
+    with open_(request) as response, open(partial, "wb") as out:
+        total = int(response.headers.get("Content-Length") or 0)
+        done = 0
+        while True:
+            chunk = response.read(1 << 18)
+            if not chunk:
+                break
+            out.write(chunk)
+            done += len(chunk)
+            if progress:
+                progress(done, total)
+    if not zipfile.is_zipfile(partial):
+        partial.unlink(missing_ok=True)
+        raise OSError("The download was not a zip file; ldraw.org may have moved the library.")
+    partial.replace(final)
+    return final
+
+
 def find_ldraw_library(hints: list[str | Path] = ()) -> Path | None:
-    """The LDraw library on this machine: an env var, a hint, or where LPub3D
-    and the usual installers put it."""
+    """The LDraw library on this machine: an env var, a hint, brickpipe's own
+    download, or where LPub3D and the usual installers put it."""
     import os
 
     candidates: list[Path] = [Path(h) for h in hints if h]
+    candidates.append(managed_library_dir() / "complete.zip")
     for var in ("LDRAW_DIR", "LDRAWDIR"):
         if os.environ.get(var):
             candidates.append(Path(os.environ[var]))

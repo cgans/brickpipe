@@ -177,6 +177,7 @@ $ldraw = $null
 if ($env:LDRAW_DIR -and (Test-Path $env:LDRAW_DIR)) { $ldraw = $env:LDRAW_DIR }
 if (-not $ldraw) {
     foreach ($candidate in @(
+        "$env:LOCALAPPDATA\brickpipe\ldraw\complete.zip",
         "$env:LOCALAPPDATA\LPub3D Software\LPub3D\libraries\complete.zip",
         "$env:USERPROFILE\ldraw", "$env:USERPROFILE\LDraw", "C:\LDraw",
         "C:\Users\Public\Documents\LDraw", (Join-Path $parent "ldraw"))) {
@@ -186,9 +187,9 @@ if (-not $ldraw) {
 if ($ldraw) { Pass "LDraw part library" $ldraw }
 else {
     Warn "LDraw part library" "not found; needed for the check that pieces clip together" @(
-        "LPub3D downloads it on first start (then rerun this check), or get complete.zip from",
-        "  https://library.ldraw.org/updates?latest",
-        "and unzip it to C:\LDraw. Elsewhere? Set `$env:LDRAW_DIR to the folder or the zip.")
+        "Get it with:  py -3 -m brickpipe --get-ldraw   (about 90 MB, from ldraw.org)",
+        "or press 'Download the library' in the page's settings.",
+        "Already have one elsewhere? Set `$env:LDRAW_DIR to the folder or the zip.")
 }
 
 $shadow = Join-Path $nova "data\offLibShadow\parts"

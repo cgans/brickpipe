@@ -248,5 +248,38 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("connectivity check was skipped", report)
 
 
+class DownloadTests(unittest.TestCase):
+    def test_download_writes_zip_and_is_found(self):
+        import io
+        with tempfile.TemporaryDirectory() as tmp:
+            lib, _ = write_libraries(Path(tmp), as_zip=True)
+            payload = lib.read_bytes()
+
+            class Resp(io.BytesIO):
+                headers = {"Content-Length": str(len(payload))}
+                def __enter__(self): return self
+                def __exit__(self, *a): self.close()
+
+            seen = []
+            target = Path(tmp) / "managed"
+            got = c.download_library(target, progress=lambda d, t: seen.append((d, t)),
+                                     opener=lambda req: Resp(payload))
+            self.assertEqual(got, target / "complete.zip")
+            self.assertEqual(seen[-1], (len(payload), len(payload)))
+            self.assertFalse((target / "complete.zip.part").exists())
+            self.assertEqual(c.find_ldraw_library([got]), got)
+
+    def test_bad_download_is_rejected(self):
+        import io
+        with tempfile.TemporaryDirectory() as tmp:
+            class Resp(io.BytesIO):
+                headers = {}
+                def __enter__(self): return self
+                def __exit__(self, *a): self.close()
+            with self.assertRaises(OSError):
+                c.download_library(Path(tmp), opener=lambda req: Resp(b"<html>not a zip"))
+            self.assertEqual(list(Path(tmp).iterdir()), [])
+
+
 if __name__ == "__main__":
     unittest.main()

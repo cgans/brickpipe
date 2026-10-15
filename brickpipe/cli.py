@@ -244,7 +244,7 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
         description="Turn an LDraw model into a parts list, a BrickLink wanted "
         "list and a step-ordered file for LPub3D.",
     )
-    parser.add_argument("model", type=Path, help="LDraw .ldr or .mpd file")
+    parser.add_argument("model", type=Path, nargs="?", help="LDraw .ldr or .mpd file")
     parser.add_argument("-o", "--out", type=Path, default=None, help="output folder")
     parser.add_argument(
         "--nova-db", type=Path, default=None,
@@ -256,6 +256,11 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
         help="the LDraw part library: a folder with parts/ and p/, or LPub3D's "
         "complete.zip (found automatically in the usual places). With --nova-db, "
         "enables the stud connectivity check.",
+    )
+    parser.add_argument(
+        "--get-ldraw", action="store_true",
+        help="download the LDraw part library (about 90 MB, from ldraw.org) into "
+        "brickpipe's own folder and exit; later runs find it automatically",
     )
     parser.add_argument(
         "--max-step-parts", type=int, default=8, help="most pieces per build step"
@@ -298,6 +303,20 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
         help="leave tool approvals to you in the Nova UI instead of granting them",
     )
     args = parser.parse_args(argv)
+
+    if args.get_ldraw:
+        def progress(done, total):
+            print(f"\r  {done / 1048576:.0f} of {total / 1048576:.0f} MB" if total else f"\r  {done / 1048576:.0f} MB",
+                  end="", flush=True)
+        try:
+            path = connectivity.download_library(progress=progress)
+        except OSError as err:
+            print(f"\nbrickpipe: download failed: {err}", file=sys.stderr)
+            return 2
+        print(f"\nSaved {path}")
+        return 0
+    if args.model is None:
+        parser.error("a model file is required (or --get-ldraw)")
 
     if args.nova_chat:
         return run_loop(args, client)
