@@ -49,30 +49,44 @@ def to_csv(
     return out.getvalue()
 
 
-def to_bricklink_xml(rows: list[BomRow], colours: dict[int, Colour]) -> tuple[str, list[BomRow]]:
+def to_bricklink_xml(
+    rows: list[BomRow],
+    colours: dict[int, Colour],
+    overrides: dict[tuple[str, int], tuple[str, int]] | None = None,
+) -> tuple[str, list[BomRow]]:
     """BrickLink wanted-list XML (Want > Upload).
 
-    Returns (xml, skipped). Rows whose colour has no BrickLink id in the table
-    are left out and returned so the caller can report them.
+    Returns (xml, skipped). Rows whose colour has no BrickLink id are left out
+    and returned so the caller can report them.
 
-    LDraw part ids are used as BrickLink item ids. They match for most common
-    parts, but not all: BrickLink flags unknown ids when the file is uploaded.
+    Without `overrides`, LDraw part ids are used as BrickLink item ids and
+    colours come from the bundled table. `overrides` maps (LDraw part, LDraw
+    colour) to BrickLink's own (item id, colour id), as returned by the
+    availability check, and wins where present. Rows that land on the same
+    BrickLink item and colour are merged.
     """
-    items: list[str] = []
+    wanted: dict[tuple[str, int], int] = {}
     skipped: list[BomRow] = []
     for row in rows:
-        colour = colours.get(row.colour)
-        if colour is None or colour.bricklink_id is None:
-            skipped.append(row)
-            continue
-        items.append(
-            "  <ITEM>"
-            "<ITEMTYPE>P</ITEMTYPE>"
-            f"<ITEMID>{escape(row.part)}</ITEMID>"
-            f"<COLOR>{colour.bricklink_id}</COLOR>"
-            f"<MINQTY>{row.quantity}</MINQTY>"
-            "</ITEM>"
-        )
+        if overrides and (row.part, row.colour) in overrides:
+            item_id, colour_id = overrides[(row.part, row.colour)]
+        else:
+            colour = colours.get(row.colour)
+            if colour is None or colour.bricklink_id is None:
+                skipped.append(row)
+                continue
+            item_id, colour_id = row.part, colour.bricklink_id
+        wanted[(item_id, colour_id)] = wanted.get((item_id, colour_id), 0) + row.quantity
+
+    items = [
+        "  <ITEM>"
+        "<ITEMTYPE>P</ITEMTYPE>"
+        f"<ITEMID>{escape(item_id)}</ITEMID>"
+        f"<COLOR>{colour_id}</COLOR>"
+        f"<MINQTY>{quantity}</MINQTY>"
+        "</ITEM>"
+        for (item_id, colour_id), quantity in wanted.items()
+    ]
     return "<INVENTORY>\n" + "\n".join(items) + "\n</INVENTORY>\n", skipped
 
 

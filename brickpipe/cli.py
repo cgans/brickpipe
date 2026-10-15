@@ -5,11 +5,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from . import bom, checks, ldraw, steps
+from . import availability, bom, checks, ldraw, rebrickable, steps
 from .catalog import PartCatalog, load_colours
 
 
-def build_report(name, pieces, rows, findings, stepped, skipped, catalog_used) -> str:
+def build_report(
+    name, pieces, rows, findings, stepped, skipped, catalog_used, availability_note=None
+) -> str:
     errors = [f for f in findings if f.level == "error"]
     warnings = [f for f in findings if f.level == "warning"]
     lines = [
@@ -27,6 +29,8 @@ def build_report(name, pieces, rows, findings, stepped, skipped, catalog_used) -
             "was given (--nova-db).",
             "",
         ]
+    if availability_note:
+        lines += [availability_note, ""]
     for title, group in (("Errors", errors), ("Warnings", warnings)):
         if group:
             lines.append(f"## {title}")
@@ -45,12 +49,14 @@ def build_report(name, pieces, rows, findings, stepped, skipped, catalog_used) -
         "- `flat.ldr`: every piece in one model; upload to Rebrickable or BrickLink "
         "to let them match parts and colours themselves",
         "- `instructions.mpd`: the model with build steps; open in LPub3D",
-        "",
     ]
+    if availability_note and "availability.csv" in availability_note:
+        lines.append("- `availability.csv`: every part and colour with its status")
+    lines.append("")
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, client: rebrickable.Client | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="brickpipe",
         description="Turn an LDraw model into a parts list, a BrickLink wanted "
@@ -69,6 +75,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--keep-steps", action="store_true",
         help="leave the model's build steps exactly as they are",
+    )
+    parser.add_argument(
+        "--availability", action="store_true",
+        help="check each part and colour against Rebrickable (needs the "
+        f"{rebrickable.KEY_ENV} environment variable; about one request per "
+        "second on the first run, cached afterwards)",
+    )
+    parser.add_argument(
+        "--cache-dir", type=Path, default=None,
+        help="where Rebrickable responses are cached "
+        "(default: ~/.cache/brickpipe/rebrickable)",
     )
     parser.add_argument(
         "--strict", action="store_true", help="exit with status 1 if any error is found"
@@ -102,12 +119,40 @@ def main(argv: list[str] | None = None) -> int:
     name = args.model.stem
     out = args.out or args.model.with_name(f"{name}-brickpipe")
     out.mkdir(parents=True, exist_ok=True)
-    xml, skipped = bom.to_bricklink_xml(rows, colours)
+
+    overrides = None
+    availability_note = None
+    if args.availability:
+        try:
+            client = client or rebrickable.Client(
+                cache_dir=args.cache_dir or rebrickable.default_cache_dir()
+            )
+            results = availability.check(rows, client, catalog)
+        except rebrickable.RebrickableError as err:
+            findings.append(checks.Finding(
+                "warning", "availability", f"Availability check did not run: {err}"
+            ))
+            availability_note = "Availability was not checked; see the warning below."
+        else:
+            findings += availability.findings(results)
+            overrides = availability.bricklink_overrides(results)
+            (out / "availability.csv").write_text(
+                availability.to_csv(results), encoding="utf-8"
+            )
+            availability_note = (
+                "Availability was checked against Rebrickable; details are in "
+                "`availability.csv`. The wanted list uses BrickLink's own part "
+                "and colour ids where Rebrickable supplied them."
+            )
+
+    xml, skipped = bom.to_bricklink_xml(rows, colours, overrides)
     (out / "parts.csv").write_text(bom.to_csv(rows, colours, catalog), encoding="utf-8")
     (out / "bricklink_wanted.xml").write_text(xml, encoding="utf-8")
     (out / "flat.ldr").write_text(bom.to_flat_ldr(pieces, name), encoding="utf-8")
     (out / "instructions.mpd").write_text(ldraw.dump(doc), encoding="utf-8")
-    report = build_report(name, pieces, rows, findings, stepped, skipped, bool(catalog))
+    report = build_report(
+        name, pieces, rows, findings, stepped, skipped, bool(catalog), availability_note
+    )
     (out / "report.md").write_text(report, encoding="utf-8")
 
     errors = sum(1 for f in findings if f.level == "error")
