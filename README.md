@@ -68,7 +68,33 @@ comment the agent wrote above the line.
 3. Run brickpipe again on the regenerated `.mpd`.
 
 Repeat until no `feedback.md` is written. Problems only you can act on, such
-as rare parts or ids to confirm, stay in `report.md` and are not sent.
+as ids to confirm, stay in `report.md` and are not sent.
+
+### Or let brickpipe run the loop
+
+With the Nova web app running, brickpipe can do the sending and fetching
+itself:
+
+```
+python -m brickpipe model.mpd -o out/ --nova-db ../ldraw-nova/data/ldraw-info.db --availability --nova-chat latest
+```
+
+`--nova-chat` names the chat that designed the model (`latest` picks the most
+recent one; a chat id or its first few characters also works). Each round
+checks the current model, attaches `feedback.md` to a message in that chat,
+waits for the agent to finish, downloads the model it delivered, and checks
+again. It stops when a check comes back clean, after `--rounds` repairs
+(default 3), or when the agent delivers nothing.
+
+Outputs: `out/round-N/` holds each round's files, `out/models/` the delivered
+models, and `out/loop.md` the summary. The exit status is 0 only when the
+final model is clean.
+
+The agent's turn is sent with Nova's "full" tool permissions so the loop never
+waits for a click; pass `--ask-tools` to approve tools yourself in the Nova
+UI instead. Nova's tools work inside that chat's own folder. Nova has no login,
+so `--nova-url` should point at a machine you trust (default
+`http://localhost:8765`).
 
 Options: `--max-step-parts N` (default 8), `--keep-steps` to leave the model's
 steps untouched, `--strict` to exit with status 1 when an error is found.
@@ -141,8 +167,8 @@ stands up, and whether a part that exists is in stock or affordable today.
 
 ## Next steps
 
-1. Send `feedback.md` to Nova and fetch the repaired model automatically,
-   looping until the model is clean.
+1. Start the loop from a prompt, so a model goes from idea to clean in one
+   command.
 2. Stud-level connectivity for ordinary bricks and plates.
 3. Price estimate per model.
 
