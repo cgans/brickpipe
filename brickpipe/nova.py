@@ -129,8 +129,13 @@ class Client:
 
     def models(self, chat_id: str) -> list[ProducedModel]:
         body = self._request("GET", f"/api/chats/{chat_id}")
+        # The chat endpoint returns models as a dict keyed by id (the chat list
+        # endpoint uses a list); accept either.
+        models = body.get("models") or {}
+        if isinstance(models, dict):
+            models = list(models.values())
         out = []
-        for m in body.get("models", []):
+        for m in models:
             if not m.get("model_url"):
                 continue  # the file is gone or not servable
             out.append(ProducedModel(

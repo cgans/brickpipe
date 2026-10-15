@@ -73,7 +73,8 @@ class FakeNova:
             if chat_id not in self.chats:
                 raise urllib.error.HTTPError(req.full_url, 404, "no such chat", {}, io.BytesIO(b""))
             return self.json({"chat": {**self.chats[chat_id], "running": self.running},
-                              "messages": [], "models": self.models[chat_id]})
+                              "messages": [],
+                              "models": {m["id"]: m for m in self.models[chat_id]}})
         if path.split("?")[0] in self.files:
             return Response(self.files[path.split("?")[0]].encode())
         raise AssertionError(f"unexpected {method} {path}")
