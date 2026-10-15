@@ -98,6 +98,13 @@ details > summary { cursor: pointer; font-weight: 700; margin-bottom: 10px; }
 .agent { margin-top: 12px; padding: 12px 14px; border-radius: 8px; background: var(--panel-2); border-left: 4px solid var(--stud); }
 .agent-text { white-space: pre-wrap; max-height: 200px; overflow: auto; font-size: .95rem; }
 .agent-text:empty::before { content: "Waiting for the agent to say something…"; color: var(--ink-2); }
+.activity { list-style: none; padding: 0; margin: 10px 0 0; }
+.activity li { border-top: 1px solid var(--line); padding: 6px 0; }
+.activity summary { cursor: pointer; display: flex; gap: 10px; align-items: baseline; font-size: .95rem; }
+.activity summary b { white-space: nowrap; }
+.activity summary code { font-family: ui-monospace, Consolas, monospace; font-size: .85rem; color: var(--ink-2); overflow-wrap: anywhere; }
+.activity summary .spin { color: var(--warn); }
+.activity pre { margin: 6px 0 0; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; font-size: .8rem; max-height: 220px; overflow: auto; white-space: pre-wrap; }
 .status { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; }
 .status .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-2); }
 .status.live .dot { background: var(--stud); animation: pulse 1.2s ease-in-out infinite; }
@@ -253,6 +260,7 @@ ul.history button:hover b { text-decoration: underline; }
       <div class="agent" id="agentBox" hidden>
         <b>The agent, live</b>
         <div class="agent-text" id="agentText"></div>
+        <ul class="activity" id="activity"></ul>
       </div>
 
       <table class="rounds" id="roundsTable" hidden>
@@ -394,6 +402,11 @@ ul.history button:hover b { text-decoration: underline; }
       });
       source.addEventListener('log', e => { current.log.push(JSON.parse(e.data).text); render(current); });
       source.addEventListener('agent_text', e => { current.agent_text = JSON.parse(e.data).text; renderAgent(current); });
+      source.addEventListener('activity', e => {
+        const d = JSON.parse(e.data);
+        current.activity = (current.activity || []).filter(a => a.id !== d.id).concat([d]);
+        renderActivity(current);
+      });
       source.addEventListener('finished', e => { render(current = JSON.parse(e.data)); source.close(); source = null; loadHistory(); loadNova(); });
     }
   }
@@ -412,7 +425,7 @@ ul.history button:hover b { text-decoration: underline; }
     }[run.status] || run.status;
     $('phaseText').textContent = live ? (run.phase || '') : '';
     $('agentBox').hidden = !(live && ['designing', 'repairing'].includes(run.status));
-    renderAgent(run);
+    renderAgent(run); renderActivity(run);
 
     $('roundsTable').hidden = !run.rounds.length;
     $('roundsBody').innerHTML = run.rounds.map(r => `<tr>
@@ -449,6 +462,15 @@ ul.history button:hover b { text-decoration: underline; }
     const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
     box.textContent = run.agent_text || '';
     if (stick) box.scrollTop = box.scrollHeight;
+  }
+
+  const openActivity = new Set();
+  function renderActivity(run) {
+    const items = (run.activity || []).slice(-40);
+    $('activity').innerHTML = items.map(a => `<li><details ${openActivity.has(a.id) ? 'open' : ''} data-id="${esc(a.id)}">
+      <summary><b>${esc(a.label)}</b><code>${esc(a.detail)}</code>${a.done ? '' : '<span class="spin">running…</span>'}</summary>
+      ${a.output ? `<pre>${esc(a.output.slice(-3000))}</pre>` : ''}</details></li>`).reverse().join('');
+    $('activity').querySelectorAll('details').forEach(d => d.addEventListener('toggle', () => d.open ? openActivity.add(d.dataset.id) : openActivity.delete(d.dataset.id)));
   }
 
   function studs(r) {

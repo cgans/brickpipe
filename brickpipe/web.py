@@ -65,6 +65,7 @@ class Run:
     finished_at: float | None = None
     log: list[str] = field(default_factory=list)
     agent_text: str = ""  # what the agent is saying right now (this turn)
+    activity: list[dict] = field(default_factory=list)  # tool calls, newest last
     tools_running: dict = field(default_factory=dict)
     events_seen: int = 0
     stop_requested: bool = False
@@ -80,6 +81,7 @@ class Run:
             "result": self.result, "error": self.error, "started_at": self.started_at,
             "finished_at": self.finished_at, "log": self.log[-300:], "request": req,
             "agent_text": self.agent_text[-4000:], "events_seen": self.events_seen,
+            "activity": self.activity[-60:],
             "files": sorted(p.name for p in self.final_dir().iterdir()) if self.final_dir() else [],
         }
 
@@ -157,6 +159,7 @@ class Runner:
             run.emit("status", {"status": status, "phase": phase})
 
         last_text_emit = [0.0]
+        last_output_emit: dict = {}
 
         def on_event(event: str, data: dict) -> None:
             run.events_seen += 1
@@ -166,13 +169,29 @@ class Runner:
                 run.emit("phase", {"phase": run.phase})
             elif event == "tool_start":
                 name = data.get("name", "")
-                run.tools_running[data.get("id", name)] = name
+                entry = {"id": data.get("id") or f"t{len(run.activity)}", "name": name,
+                         "label": tool_label(name), "detail": tool_detail(name, data.get("arguments")),
+                         "output": "", "done": False, "at": time.strftime("%H:%M:%S")}
+                run.activity.append(entry)
+                run.activity = run.activity[-200:]
+                run.tools_running[entry["id"]] = entry
                 run.phase = nova_phase(name)
-                run.note(f"Agent started: {name}")
+                run.note(f"{entry['label']}: {entry['detail']}"[:300])
                 run.emit("phase", {"phase": run.phase})
+                run.emit("activity", entry)
+            elif event == "tool_output":
+                entry = run.tools_running.get(data.get("id"))
+                if entry is not None and data.get("delta"):
+                    entry["output"] = (entry["output"] + str(data["delta"]))[-3000:]
+                    now = time.monotonic()
+                    if now - last_output_emit.get(entry["id"], 0.0) > 0.5:
+                        last_output_emit[entry["id"]] = now
+                        run.emit("activity", entry)
             elif event == "tool_end":
-                run.tools_running.pop(data.get("id"), None)
-                run.note(f"Agent finished: {data.get('name', '')}")
+                entry = run.tools_running.pop(data.get("id"), None)
+                if entry is not None:
+                    entry["done"] = True
+                    run.emit("activity", entry)
             elif event == "text" and data.get("delta"):
                 run.agent_text = (run.agent_text + str(data["delta"]))[-8000:]
                 now = time.monotonic()
@@ -265,6 +284,30 @@ class Runner:
         if not produced:
             raise nova.NovaError("That chat has not produced a model yet.")
         return agent.download(produced[-1], models_dir), chat["id"]
+
+
+def tool_label(tool: str) -> str:
+    return {
+        "run_shell": "Ran shell", "run_python": "Ran Python", "run_toolkit": "Ran Nova toolkit",
+        "publish_model": "Published model", "view_image": "Viewed image", "read_file": "Read file",
+        "write_file": "Wrote file", "list_files": "Listed files",
+    }.get(tool, tool or "Tool")
+
+
+def tool_detail(tool: str, arguments) -> str:
+    """The one argument worth showing for a tool call, shortened."""
+    try:
+        args = json.loads(arguments) if isinstance(arguments, str) else (arguments or {})
+    except ValueError:
+        args = {}
+    if not isinstance(args, dict):
+        return ""
+    if tool == "run_toolkit":
+        value = " ".join(str(a) for a in args.get("arguments", []))
+    else:
+        value = args.get("command") or args.get("code") or args.get("path") or ""
+    value = " ".join(str(value).split())
+    return value[:220] + ("…" if len(value) > 220 else "")
 
 
 def nova_phase(tool: str) -> str:
