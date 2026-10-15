@@ -152,6 +152,13 @@ def run_pipeline(
     findings += checks.check_steps(doc, max_step_parts)
 
     connectivity_note = None
+    if connectors:
+        n_conn = sum(1 for f in findings if f.check == "connectivity")
+        connectivity_note = (
+            "Stud connectivity was checked: every piece is joined to the model by a "
+            "stud, pin or axle." if not n_conn else
+            "Stud connectivity was checked; see the connectivity findings below."
+        )
     if not connectors:
         missing = []
         if not shadow_path:
@@ -259,7 +266,7 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
     )
     parser.add_argument(
         "--get-ldraw", action="store_true",
-        help="download the LDraw part library (about 90 MB, from ldraw.org) into "
+        help="download the LDraw part library (about 150 MB, from ldraw.org) into "
         "brickpipe's own folder and exit; later runs find it automatically",
     )
     parser.add_argument(

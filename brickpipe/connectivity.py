@@ -400,7 +400,7 @@ def download_library(
     url: str = LDRAW_ZIP_URL,
     opener=None,
 ) -> Path:
-    """Fetch complete.zip (about 90 MB, free, from ldraw.org) into the managed
+    """Fetch complete.zip (about 150 MB, free, from ldraw.org) into the managed
     folder and return the zip's path. `progress(done_bytes, total_bytes)` is
     called as it goes. The download is written to a temporary name and
     renamed only when it is complete, so a half-finished file is never used."""
@@ -443,7 +443,11 @@ def find_ldraw_library(hints: list[str | Path] = ()) -> Path | None:
     local = os.environ.get("LOCALAPPDATA")
     if local:
         candidates.append(Path(local) / "LPub3D Software" / "LPub3D" / "libraries" / "complete.zip")
+    if os.environ.get("LPUB3D"):
+        candidates.append(Path(os.environ["LPUB3D"]).parent / "libraries" / "complete.zip")
     home = Path.home()
+    for base in (home / "Desktop", home / "Downloads", home):
+        candidates += sorted(base.glob("LPub3D*/libraries/complete.zip")) if base.is_dir() else []
     candidates += [
         home / "ldraw", home / "LDraw", Path("C:/LDraw"), Path("C:/Users/Public/Documents/LDraw"),
         Path("/usr/share/ldraw"), Path("/opt/ldraw/ldraw"), Path("/opt/ldraw"),

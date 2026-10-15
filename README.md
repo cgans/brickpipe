@@ -91,7 +91,7 @@ python -m brickpipe model.mpd -o out/ --nova-db ../ldraw-nova/data/ldraw-info.db
 Needs two things, both found automatically when they are in the usual places:
 
 - **The LDraw part library.** Get it once with `python -m brickpipe --get-ldraw`
-  (about 90 MB, free, from ldraw.org; kept in brickpipe's own folder), or press
+  (about 150 MB, free, from ldraw.org; kept in brickpipe's own folder), or press
   "Download the library" in the page's settings. A folder with `parts/` and
   `p/`, or LPub3D's `complete.zip`, also works via `--ldraw-dir` or `LDRAW_DIR`.
   A part's studs are references to the `stud.dat` primitive in its official
