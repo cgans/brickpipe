@@ -221,6 +221,11 @@ ul.history button:hover b { text-decoration: underline; }
             <input id="novaDb" type="text" placeholder="C:\…\ldraw-nova\data\ldraw-info.db">
           </div>
           <div>
+            <label for="ldrawDir">LDraw part library</label>
+            <input id="ldrawDir" type="text" placeholder="LPub3D's complete.zip, or a folder with parts\ and p\">
+            <p class="small muted">With Nova's database, enables the check that pieces actually clip together.</p>
+          </div>
+          <div>
             <label for="rounds">Most repair rounds</label>
             <input id="rounds" type="number" min="0" max="10" value="3" style="width:6em">
           </div>
@@ -325,11 +330,12 @@ ul.history button:hover b { text-decoration: underline; }
     $('version').textContent = s.version ? 'v' + s.version : '';
     $('novaUrl').value = store.get('nova_url', '') || s.nova_url;
     $('novaDb').value = store.get('nova_db', '') || s.nova_db;
+    $('ldrawDir').value = store.get('ldraw_dir', '') || s.ldraw_dir || '';
     $('rounds').value = store.get('rounds', '') || s.rounds;
     $('rebrickableKey').value = store.get('rebrickable_key', '');
     if (!$('rebrickableKey').value) $('settings').open = true;
   }
-  for (const [id, key] of [['novaUrl', 'nova_url'], ['novaDb', 'nova_db'], ['rounds', 'rounds'], ['rebrickableKey', 'rebrickable_key']]) {
+  for (const [id, key] of [['novaUrl', 'nova_url'], ['novaDb', 'nova_db'], ['ldrawDir', 'ldraw_dir'], ['rounds', 'rounds'], ['rebrickableKey', 'rebrickable_key']]) {
     $(id).addEventListener('change', () => store.set(key, $(id).value.trim()));
   }
 
@@ -359,7 +365,7 @@ ul.history button:hover b { text-decoration: underline; }
     e.preventDefault();
     $('formError').textContent = '';
     const body = {
-      nova_url: $('novaUrl').value.trim(), nova_db: $('novaDb').value.trim(),
+      nova_url: $('novaUrl').value.trim(), nova_db: $('novaDb').value.trim(), ldraw_dir: $('ldrawDir').value.trim(),
       rounds: Number($('rounds').value) || 3, rebrickable_key: $('rebrickableKey').value.trim(),
     };
     if ($('existing').open) {

@@ -26,7 +26,7 @@ from pathlib import Path
 import urllib.parse
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import loop, nova, rebrickable
+from . import connectivity, loop, nova, rebrickable
 from .cli import PipelineError, run_pipeline
 
 DEFAULT_PORT = 8766
@@ -165,6 +165,7 @@ class Runner:
         key = req.get("rebrickable_key") or ""
         client = rebrickable.Client(key=key, cache_dir=rebrickable.default_cache_dir()) if key else None
         nova_db = Path(req["nova_db"]) if req.get("nova_db") else None
+        ldraw_dir = Path(req["ldraw_dir"]) if req.get("ldraw_dir") else None
 
         def set_status(status: str, phase: str = "") -> None:
             run.status, run.phase = status, phase
@@ -254,6 +255,7 @@ class Runner:
                 log=run.note, on_event=on_event, on_round=on_round,
                 stop=lambda: run.stop_requested,
                 nova_db=nova_db, check_availability=bool(client), client=client,
+                ldraw_dir=ldraw_dir,
             )
             run.result = {
                 "clean": outcome.clean, "reason": outcome.stopped_because,
@@ -511,6 +513,7 @@ def make_server(port: int = DEFAULT_PORT, runs_dir: Path | None = None,
         "version": __version__,
         "nova_url": nova_url,
         "nova_db": nova_db if nova_db is not None else guess_nova_db(here),
+        "ldraw_dir": str(connectivity.find_ldraw_library() or ""),
         "rounds": 3,
     }
     handler.page = resources.files("brickpipe").joinpath("web/index.html").read_bytes()

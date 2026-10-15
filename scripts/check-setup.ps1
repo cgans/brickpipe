@@ -171,6 +171,30 @@ if ((Test-Path $nova) -and (Test-Path $novaDocker)) {
     Fail "Nova folders" "ldraw-nova and ldraw-nova-docker are not next to brickpipe" $cloneFix
 }
 
+# --- Needed for the stud connectivity check ----------------------------------
+
+$ldraw = $null
+if ($env:LDRAW_DIR -and (Test-Path $env:LDRAW_DIR)) { $ldraw = $env:LDRAW_DIR }
+if (-not $ldraw) {
+    foreach ($candidate in @(
+        "$env:LOCALAPPDATA\LPub3D Software\LPub3D\libraries\complete.zip",
+        "$env:USERPROFILE\ldraw", "$env:USERPROFILE\LDraw", "C:\LDraw",
+        "C:\Users\Public\Documents\LDraw", (Join-Path $parent "ldraw"))) {
+        if ($candidate -and (Test-Path $candidate)) { $ldraw = $candidate; break }
+    }
+}
+if ($ldraw) { Pass "LDraw part library" $ldraw }
+else {
+    Warn "LDraw part library" "not found; needed for the check that pieces clip together" @(
+        "LPub3D downloads it on first start (then rerun this check), or get complete.zip from",
+        "  https://library.ldraw.org/updates?latest",
+        "and unzip it to C:\LDraw. Elsewhere? Set `$env:LDRAW_DIR to the folder or the zip.")
+}
+
+$shadow = Join-Path $nova "data\offLibShadow\parts"
+if ((Test-Path $nova) -and (Test-Path $shadow)) { Pass "Nova shadow library" "found (connector data)" }
+elseif (Test-Path $nova) { Warn "Nova shadow library" "missing from the Nova clone; connectivity cannot be checked" $cloneFix }
+
 # --- Needed to view the results ---------------------------------------------
 
 # LPub3D for Windows ships as a portable zip, so it can live anywhere. Look
