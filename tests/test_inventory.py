@@ -35,7 +35,18 @@ class SubtractTests(unittest.TestCase):
         left = inventory.remaining_rows(covered)
         self.assertEqual([(r.part, r.colour, r.quantity) for r in left], [("3001", 15, 1), ("3035", 4, 1)])
         self.assertEqual(inventory.summary(covered), {"need": 7, "have": 5, "buy": 2,
-                                                      "lots_covered": 2, "lots_total": 4})
+                                                      "lots_covered": 2, "lots_total": 4,
+                                                      "unused": 0, "unused_lots": 0})
+
+    def test_listed_bricks_the_model_does_not_use_are_reported(self):
+        inv = inventory.from_text("3001, White, 3\n9999, Red, 10\n3001, Red, 2\n", COLOURS)
+        leftover = {}
+        covered = inventory.subtract(self.rows, inv, leftover=leftover)
+        self.assertEqual(leftover, {("9999", 4): 10, ("3001", 4): 2})
+        summary = inventory.summary(covered, leftover)
+        self.assertEqual((summary["unused"], summary["unused_lots"]), (12, 2))
+        csv_text = inventory.to_csv(covered, COLOURS, leftover)
+        self.assertIn("9999,4,Red,0,10,0", csv_text)
 
     def test_any_colour_is_shared_across_lots(self):
         inv = inventory.from_text("3035, , 1\n", COLOURS)
@@ -106,11 +117,12 @@ class PipelineTests(unittest.TestCase):
 
     def test_cli_owned_file(self):
         with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "mine.csv").write_text("3001, White, 2\n")
+            (Path(tmp) / "mine.csv").write_text("3001, White, 2\n3001, Red, 5\n")
             code = cli.main([str(EXAMPLE), "-o", str(Path(tmp) / "out"), "--owned", str(Path(tmp) / "mine.csv")])
             report = (Path(tmp) / "out" / "report.md").read_text()
         self.assertEqual(code, 0)
         self.assertIn("You already have 2 of the 7 pieces", report)
+        self.assertIn("5 of the bricks you listed (1 line(s)) are not used in this model", report)
 
 
 if __name__ == "__main__":

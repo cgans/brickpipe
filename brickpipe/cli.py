@@ -229,10 +229,11 @@ def run_pipeline(
             ))
     rows_to_buy = rows
     if owned is not None:
-        covered = inventory.subtract(rows, owned, aliases)
+        leftover: dict = {}
+        covered = inventory.subtract(rows, owned, aliases, leftover=leftover)
         rows_to_buy = inventory.remaining_rows(covered)
-        owned_summary = inventory.summary(covered)
-        (out / "owned.csv").write_text(inventory.to_csv(covered, colours), encoding="utf-8")
+        owned_summary = inventory.summary(covered, leftover)
+        (out / "owned.csv").write_text(inventory.to_csv(covered, colours, leftover), encoding="utf-8")
         for problem in owned.problems[:10]:
             findings.append(checks.Finding("warning", "owned", f"Inventory: {problem}"))
         owned_note = (
@@ -241,6 +242,12 @@ def run_pipeline(
             f"the wanted list holds the {owned_summary['buy']} still to buy. "
             "Details are in `owned.csv`."
         )
+        if owned_summary["unused"]:
+            owned_note += (
+                f" {owned_summary['unused']} of the bricks you listed "
+                f"({owned_summary['unused_lots']} line(s)) are not used in this model at all; "
+                "check the part number and colour. They are the rows with need 0 in `owned.csv`."
+            )
         if owned.source == "rebrickable" and not aliases:
             owned_note += (" Rebrickable parts could only be matched by id; run with "
                            "--availability for colour-aware matching.")
