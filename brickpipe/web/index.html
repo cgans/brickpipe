@@ -204,6 +204,33 @@ ul.history button:hover b { text-decoration: underline; }
         </div>
       </details>
 
+      <details id="owned">
+        <summary>Bricks you already have</summary>
+        <div class="stack">
+          <p class="small muted">Anything here is left out of the wanted list, so you only buy what is missing.</p>
+          <div>
+            <label for="ownedText">Typed in</label>
+            <textarea id="ownedText" style="min-height:80px" placeholder="part, colour, quantity — one per line, e.g.&#10;3001, Red, 12&#10;3024, White, 30&#10;3005, , 8   (any colour)"></textarea>
+          </div>
+          <div>
+            <label>Your Rebrickable collection</label>
+            <div id="rbLoggedOut" class="stack">
+              <p class="small muted">Sign in once; brickpipe keeps only the token Rebrickable returns, in this browser. Needs the API key in Settings.</p>
+              <div class="row">
+                <input id="rbUser" type="text" class="grow" placeholder="Username or email" autocomplete="username">
+                <input id="rbPass" type="password" class="grow" placeholder="Password" autocomplete="current-password">
+                <button class="btn quiet small" id="rbLogin" type="button">Sign in</button>
+              </div>
+              <p class="err small" id="rbError"></p>
+            </div>
+            <div id="rbLoggedIn" class="row" hidden>
+              <span class="small">Connected: your sets and part lists will be subtracted.</span>
+              <button class="btn quiet small" id="rbLogout" type="button">Forget</button>
+            </div>
+          </div>
+        </div>
+      </details>
+
       <details id="settings">
         <summary>Settings</summary>
         <div class="stack">
@@ -327,11 +354,30 @@ ul.history button:hover b { text-decoration: underline; }
     $('novaDb').value = store.get('nova_db', '') || s.nova_db;
     $('rounds').value = store.get('rounds', '') || s.rounds;
     $('rebrickableKey').value = store.get('rebrickable_key', '');
+    $('ownedText').value = store.get('owned_text', '');
+    rbRender();
     if (!$('rebrickableKey').value) $('settings').open = true;
   }
-  for (const [id, key] of [['novaUrl', 'nova_url'], ['novaDb', 'nova_db'], ['rounds', 'rounds'], ['rebrickableKey', 'rebrickable_key']]) {
+  for (const [id, key] of [['novaUrl', 'nova_url'], ['novaDb', 'nova_db'], ['rounds', 'rounds'], ['rebrickableKey', 'rebrickable_key'], ['ownedText', 'owned_text']]) {
     $(id).addEventListener('change', () => store.set(key, $(id).value.trim()));
   }
+
+  function rbRender() {
+    const has = !!store.get('rebrickable_user_token', '');
+    $('rbLoggedOut').hidden = has; $('rbLoggedIn').hidden = !has;
+  }
+  $('rbLogin').onclick = async () => {
+    $('rbError').textContent = '';
+    if (!$('rebrickableKey').value.trim()) { $('rbError').textContent = 'Put your Rebrickable API key in Settings first.'; $('settings').open = true; return; }
+    $('rbLogin').disabled = true;
+    try {
+      const r = await api('/api/rebrickable/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: $('rebrickableKey').value.trim(), username: $('rbUser').value.trim(), password: $('rbPass').value }) });
+      store.set('rebrickable_user_token', r.user_token); $('rbPass').value = ''; rbRender();
+    } catch (e) { $('rbError').textContent = e.message; }
+    finally { $('rbLogin').disabled = false; }
+  };
+  $('rbLogout').onclick = () => { store.set('rebrickable_user_token', ''); rbRender(); };
 
   async function loadNova() {
     const q = '?nova_url=' + encodeURIComponent($('novaUrl').value.trim());
@@ -361,6 +407,7 @@ ul.history button:hover b { text-decoration: underline; }
     const body = {
       nova_url: $('novaUrl').value.trim(), nova_db: $('novaDb').value.trim(),
       rounds: Number($('rounds').value) || 3, rebrickable_key: $('rebrickableKey').value.trim(),
+      owned_text: $('ownedText').value.trim(), rebrickable_user_token: store.get('rebrickable_user_token', ''),
     };
     if ($('existing').open) {
       body.model_file = $('modelFile').value; body.chat_id = $('chatId').value || 'latest';
@@ -462,7 +509,7 @@ ul.history button:hover b { text-decoration: underline; }
       o.className = 'outcome ' + (run.status === 'failed' ? 'failed' : clean ? 'clean' : 'stopped');
       o.innerHTML = run.status === 'failed'
         ? `<b>The run failed.</b> ${esc(run.error || '')}`
-        : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.` + viewerBox(run)
+        : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.` + ownedLine(run) + viewerBox(run)
         : `<b>Stopped before the model was clean.</b> ${esc(run.result ? run.result.reason : '')} The files below are for the last model checked.`;
     } else { o.hidden = true; }
     wireViewer(run);
@@ -514,6 +561,11 @@ ul.history button:hover b { text-decoration: underline; }
       <iframe class="viewer-frame" src="${esc(src)}" title="Nova's 3D viewer" loading="lazy" allow="xr-spatial-tracking; fullscreen"></iframe>
     </div>`;
   }
+  function ownedLine(run) {
+    const o = run.result && run.result.owned;
+    if (!o) return '';
+    return `<p style="margin-top:8px">You already have <b>${o.have}</b> of the ${o.need} pieces (${o.lots_covered} of ${o.lots_total} lots complete); the wanted list holds the <b>${o.buy}</b> still to buy.</p>`;
+  }
   function wireViewer(run) {
     document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { view.mode = b.dataset.mode; render(run); });
     document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => {
@@ -547,12 +599,13 @@ ul.history button:hover b { text-decoration: underline; }
     'instructions.mpd': 'Build steps, open in LPub3D',
     'flat.ldr': 'All pieces in one file, for Rebrickable',
     'availability.csv': 'Each part and colour, was it ever made',
+    'owned.csv': 'Each lot: need, have, buy',
     'report.md': 'Problems found',
     'feedback.md': 'Repair request for the agent',
   };
   async function renderFiles(run) {
     const base = '/api/runs/' + run.id + '/files/';
-    const order = ['bricklink_wanted.xml', 'instructions.mpd', 'parts.csv', 'flat.ldr', 'availability.csv'];
+    const order = ['bricklink_wanted.xml', 'instructions.mpd', 'parts.csv', 'owned.csv', 'flat.ldr', 'availability.csv'];
     const files = order.filter(f => run.files.includes(f));
     $('files').innerHTML = files.map(f => `<div class="file"><b>${esc(f)}</b><span class="small muted">${esc(fileNotes[f] || '')}</span>
       <div class="row"><a class="btn quiet small" href="${base + f}?download=1">Download</a>${f === 'bricklink_wanted.xml' ? '<button class="btn quiet small" type="button" data-copy="' + f + '">Copy for BrickLink</button>' : ''}</div></div>`).join('');

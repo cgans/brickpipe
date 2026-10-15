@@ -44,10 +44,13 @@ def default_cache_dir() -> Path:
     return Path(root) / "brickpipe" / "rebrickable"
 
 
-def http_get(url: str, key: str) -> dict:
-    """One live GET. Raises NotFound on 404, RebrickableError otherwise."""
+def http_get(url: str, key: str, data: bytes | None = None) -> dict:
+    """One live GET (or POST when `data` is given). Raises NotFound on 404,
+    RebrickableError otherwise."""
     request = urllib.request.Request(
-        url, headers={"Authorization": f"key {key}", "Accept": "application/json"}
+        url, data=data, method="POST" if data is not None else "GET",
+        headers={"Authorization": f"key {key}", "Accept": "application/json",
+                 **({"Content-Type": "application/x-www-form-urlencoded"} if data is not None else {})},
     )
     for attempt in range(4):
         try:
@@ -79,8 +82,10 @@ class Client:
         cache_dir: Path | None = None,
         fetch: Callable[[str], dict] | None = None,
         sleep: Callable[[float], None] = time.sleep,
+        post: Callable[[str, bytes], dict] | None = None,
     ):
-        """`fetch` replaces the network call; tests use it to serve fixtures."""
+        """`fetch` replaces the network call; tests use it to serve fixtures.
+        `post` likewise for the one POST (signing in)."""
         if fetch is None:
             key = key or os.environ.get(KEY_ENV, "").strip()
             if not key:
@@ -89,7 +94,9 @@ class Client:
                     "(free key: rebrickable.com > Account > Settings > API)."
                 )
             fetch = lambda url: http_get(url, key)  # noqa: E731
+            post = post or (lambda url, data: http_get(url, key, data))
         self._fetch = fetch
+        self._post = post or (lambda url, data: {})
         self._sleep = sleep
         self._cache_dir = cache_dir
         self._last_call = 0.0
@@ -102,8 +109,8 @@ class Client:
             return None
         return self._cache_dir / (hashlib.sha256(url.encode()).hexdigest()[:32] + ".json")
 
-    def _get(self, url: str) -> dict:
-        path = self._cache_path(url)
+    def _get(self, url: str, cache: bool = True) -> dict:
+        path = self._cache_path(url) if cache else None
         if path and path.is_file():
             try:
                 saved = json.loads(path.read_text("utf-8"))
@@ -129,13 +136,13 @@ class Client:
             )
         return body
 
-    def _list(self, path: str, **params) -> list[dict]:
+    def _list(self, path: str, _cache: bool = True, **params) -> list[dict]:
         """Fetch every page of a list endpoint."""
         params.setdefault("page_size", 1000)
         url: str | None = f"{BASE_URL}{path}?{urllib.parse.urlencode(params)}"
         results: list[dict] = []
         while url:
-            body = self._get(url)
+            body = self._get(url, cache=_cache)
             if body.get("__not_found__"):
                 break
             if "results" not in body:
@@ -162,6 +169,23 @@ class Client:
 
     def parts_by_ldraw_id(self, ldraw_id: str) -> list[dict]:
         return self._list("/lego/parts/", ldraw_id=ldraw_id, inc_part_details=1)
+
+    # -- the user's own collection (never cached: it changes) -------------
+
+    def sign_in(self, username: str, password: str) -> str:
+        """Trade a Rebrickable username and password for a user token. The
+        password is sent once to Rebrickable and not kept."""
+        data = urllib.parse.urlencode({"username": username, "password": password}).encode()
+        body = self._post(f"{BASE_URL}/users/_token/", data)
+        token = body.get("user_token")
+        if not token:
+            raise RebrickableError("Rebrickable did not return a user token; check the username and password.")
+        return str(token)
+
+    def owned_parts(self, user_token: str) -> list[dict]:
+        """Everything in the user's part lists and set lists."""
+        quoted = urllib.parse.quote(user_token, safe="")
+        return self._list(f"/users/{quoted}/allparts/", _cache=False)
 
     def part_colours(self, part_num: str) -> list[dict]:
         quoted = urllib.parse.quote(part_num, safe="")
