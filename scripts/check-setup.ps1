@@ -173,21 +173,33 @@ if ((Test-Path $nova) -and (Test-Path $novaDocker)) {
 
 # --- Needed to view the results ---------------------------------------------
 
-$lpub = @(
-    "$env:ProgramFiles\LPub3D\LPub3D.exe",
-    "${env:ProgramFiles(x86)}\LPub3D\LPub3D.exe",
-    "$env:LOCALAPPDATA\Programs\LPub3D\LPub3D.exe"
-) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+# LPub3D for Windows ships as a portable zip, so it can live anywhere. Look
+# in the usual places, then one level deep under the home, Desktop, Downloads
+# and Program Files folders.
+$lpub = $null
+if ($env:LPUB3D -and (Test-Path $env:LPUB3D)) { $lpub = $env:LPUB3D }
+if (-not $lpub) {
+    $roots = @($env:USERPROFILE, "$env:USERPROFILE\Desktop", "$env:USERPROFILE\Downloads",
+               $env:ProgramFiles, ${env:ProgramFiles(x86)}, "$env:LOCALAPPDATA\Programs") |
+             Where-Object { $_ -and (Test-Path $_) }
+    foreach ($root in $roots) {
+        $hit = Get-ChildItem -Path $root -Directory -Filter "LPub3D*" -ErrorAction SilentlyContinue |
+               ForEach-Object { Get-ChildItem -Path $_.FullName -Filter "LPub3D.exe" -Recurse -Depth 1 -ErrorAction SilentlyContinue } |
+               Select-Object -First 1
+        if ($hit) { $lpub = $hit.FullName; break }
+    }
+}
 if (-not $lpub) {
     $cmd = Get-Command "LPub3D" -ErrorAction SilentlyContinue
     if ($cmd) { $lpub = $cmd.Source }
 }
 if ($lpub) { Pass "LPub3D" $lpub }
 else {
-    Warn "LPub3D" "not found in the usual places; needed only to make instruction pages" @(
-        "Download the Windows installer from:",
-        "  https://github.com/trevorsandy/lpub3d/releases",
-        "A quick alternative for viewing a model without steps: https://www.leocad.org")
+    Warn "LPub3D" "not found; needed only to make instruction pages" @(
+        "Download the 64-bit Windows zip (LPub3D_x86_64-...zip) from:",
+        "  https://github.com/trevorsandy/lpub3d/releases/latest",
+        "Extract it to a folder named LPub3D on your Desktop and run LPub3D.exe from there.",
+        "Extracted it somewhere else? Set `$env:LPUB3D to the full path of LPub3D.exe.")
 }
 
 Write-Host ""

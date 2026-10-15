@@ -13,7 +13,7 @@ launcher, use `python` instead; the setup check tells you which one works.
 | Git | getting the code | `winget install --id Git.Git -e` |
 | Python 3.10 or newer | running brickpipe | `winget install --id Python.Python.3.13 -e` |
 | Docker Desktop | running LDraw Nova | `winget install --id Docker.DockerDesktop -e` |
-| LPub3D | viewing the build instructions | installer from [its releases page](https://github.com/trevorsandy/lpub3d/releases) |
+| LPub3D | viewing the build instructions | portable zip from [its releases page](https://github.com/trevorsandy/lpub3d/releases/latest); see step 8 |
 | An AI provider key (OpenAI, Anthropic or OpenRouter) | Nova's agent | from the provider |
 | A Rebrickable key | `--availability` | free: rebrickable.com > Account > Settings > API |
 | A BrickLink account | uploading the wanted list | free |
@@ -121,8 +121,15 @@ getting shorter.
 
 ## 8. Check the results in the real tools
 
-- **Instructions:** open `out\instructions.mpd` in LPub3D and page through the
-  steps. Export a PDF from its File menu.
+- **Instructions:** LPub3D for Windows has no installer. From its
+  [latest release](https://github.com/trevorsandy/lpub3d/releases/latest),
+  download the 64-bit zip, named like `LPub3D_x86_64-2.4.9...zip` (not the
+  `renderers-win` zip and not the 32-bit `LPub3D_x86-` one). Right-click >
+  Extract All to a folder such as `Desktop\LPub3D`, run `LPub3D.exe` from the
+  extracted folder, and accept the LDraw library download on first start. If
+  SmartScreen objects: More info > Run anyway. Then File > Open
+  `out\instructions.mpd` and page through the steps. Export a PDF from its
+  File menu.
 - **Shopping list:** on BrickLink, go to Want > Upload and upload
   `out\bricklink_wanted.xml`. Note any item it rejects.
 - **Second opinion:** upload `out\flat.ldr` to Rebrickable as a custom parts
@@ -151,6 +158,7 @@ docker compose down
 | `Availability check did not run: No API key` | The key is not set in this window | Set `$env:REBRICKABLE_API_KEY` again; it does not survive closing PowerShell |
 | `Rebrickable rejected the API key` | Wrong or regenerated key | Copy the key again from your Rebrickable settings |
 | LPub3D cannot find parts | It has not downloaded the LDraw library | Accept its offer to download the library on first start |
+| LPub3D will not start from the zip | It was run from inside the zip | Extract the whole zip first, then run `LPub3D.exe` from the extracted folder |
 
 To see why the Nova container failed:
 
