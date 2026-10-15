@@ -119,6 +119,17 @@ Nova chat and send it. When the agent finishes, repeat step 6 on the new file.
 Stop when no `feedback.md` is written, or after three rounds if it is not
 getting shorter.
 
+### Or let brickpipe run the loop
+
+```powershell
+py -3 -m brickpipe ..\ldraw-nova-docker\data\generated\<model-name>.mpd -o out --nova-db ..\ldraw-nova\data\ldraw-info.db --availability --nova-chat latest
+notepad out\loop.md
+```
+
+This sends `feedback.md` to the most recent Nova chat, waits for the agent,
+fetches the repaired model and checks it again, up to three times. Watch the
+Nova tab if you like; the agent's replies appear there as usual.
+
 ## 8. Check the results in the real tools
 
 - **Instructions:** LPub3D for Windows has no installer. From its

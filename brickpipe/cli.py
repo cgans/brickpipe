@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import argparse
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 
-from . import availability, bom, checks, feedback, ldraw, rebrickable, steps
+from . import availability, bom, checks, feedback, ldraw, nova, rebrickable, steps
 from .catalog import PartCatalog, load_colours
 
 
@@ -62,54 +63,57 @@ def build_report(
     return "\n".join(lines)
 
 
-def main(argv: list[str] | None = None, client: rebrickable.Client | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        prog="brickpipe",
-        description="Turn an LDraw model into a parts list, a BrickLink wanted "
-        "list and a step-ordered file for LPub3D.",
-    )
-    parser.add_argument("model", type=Path, help="LDraw .ldr or .mpd file")
-    parser.add_argument("-o", "--out", type=Path, default=None, help="output folder")
-    parser.add_argument(
-        "--nova-db", type=Path, default=None,
-        help="path to LDraw Nova's data/ldraw-info.db (adds part names, part "
-        "checks, better step ordering and the floating-piece check)",
-    )
-    parser.add_argument(
-        "--max-step-parts", type=int, default=8, help="most pieces per build step"
-    )
-    parser.add_argument(
-        "--keep-steps", action="store_true",
-        help="leave the model's build steps exactly as they are",
-    )
-    parser.add_argument(
-        "--availability", action="store_true",
-        help="check each part and colour against Rebrickable (needs the "
-        f"{rebrickable.KEY_ENV} environment variable; about one request per "
-        "second on the first run, cached afterwards)",
-    )
-    parser.add_argument(
-        "--cache-dir", type=Path, default=None,
-        help="where Rebrickable responses are cached "
-        "(default: ~/.cache/brickpipe/rebrickable)",
-    )
-    parser.add_argument(
-        "--strict", action="store_true", help="exit with status 1 if any error is found"
-    )
-    args = parser.parse_args(argv)
+class PipelineError(Exception):
+    pass
 
+
+@dataclass
+class Result:
+    """What one run produced; the files are in `out`."""
+
+    name: str
+    out: Path
+    piece_count: int
+    lot_count: int
+    findings: list
+    feedback: str | None  # the repair request text, or None when clean
+
+    @property
+    def errors(self) -> int:
+        return sum(1 for f in self.findings if f.level == "error")
+
+    @property
+    def warnings(self) -> int:
+        return len(self.findings) - self.errors
+
+    def summary(self) -> str:
+        return (f"{self.name}: {self.piece_count} pieces, {self.lot_count} lots, "
+                f"{self.errors} error(s), {self.warnings} warning(s)")
+
+
+def run_pipeline(
+    model: Path,
+    out: Path | None = None,
+    *,
+    nova_db: Path | None = None,
+    max_step_parts: int = 8,
+    keep_steps: bool = False,
+    check_availability: bool = False,
+    cache_dir: Path | None = None,
+    client: rebrickable.Client | None = None,
+) -> Result:
+    """Run every check on `model` and write the outputs. Raises PipelineError."""
+    model = Path(model)
     try:
-        doc = ldraw.load(args.model)
-        catalog = PartCatalog(args.nova_db) if args.nova_db else None
+        doc = ldraw.load(model)
+        catalog = PartCatalog(nova_db) if nova_db else None
     except (OSError, ValueError) as err:
-        print(f"brickpipe: {err}", file=sys.stderr)
-        return 2
+        raise PipelineError(str(err)) from None
     colours = load_colours()
 
     pieces, problems = ldraw.flatten(doc)
     if not pieces:
-        print("No pieces found in the model.", file=sys.stderr)
-        return 1
+        raise PipelineError("No pieces found in the model.")
     rows = bom.build(pieces)
 
     findings = [
@@ -127,21 +131,21 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
         findings += checks.check_floating(pieces, catalog)
 
     stepped = (
-        [] if args.keep_steps
-        else steps.add_steps_everywhere(doc, catalog, args.max_step_parts)
+        [] if keep_steps
+        else steps.add_steps_everywhere(doc, catalog, max_step_parts)
     )
-    findings += checks.check_steps(doc, args.max_step_parts)
+    findings += checks.check_steps(doc, max_step_parts)
 
-    name = args.model.stem
-    out = args.out or args.model.with_name(f"{name}-brickpipe")
+    name = model.stem
+    out = out or model.with_name(f"{name}-brickpipe")
     out.mkdir(parents=True, exist_ok=True)
 
     overrides = None
     availability_note = None
-    if args.availability:
+    if check_availability:
         try:
             client = client or rebrickable.Client(
-                cache_dir=args.cache_dir or rebrickable.default_cache_dir()
+                cache_dir=cache_dir or rebrickable.default_cache_dir()
             )
             results = availability.check(rows, client, catalog)
         except rebrickable.RebrickableError as err:
@@ -181,14 +185,104 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
     if catalog:
         catalog.close()
 
-    errors = sum(1 for f in findings if f.level == "error")
-    warnings = len(findings) - errors
-    print(f"{name}: {len(pieces)} pieces, {len(rows)} lots, "
-          f"{errors} error(s), {warnings} warning(s)")
-    print(f"Wrote {out}/")
-    if request:
+    return Result(name, out, len(pieces), len(rows), findings, request)
+
+
+def run_loop(args, client: rebrickable.Client | None) -> int:
+    from . import loop
+
+    out = args.out or args.model.with_name(f"{args.model.stem}-repair")
+    try:
+        outcome = loop.run(
+            nova.Client(args.nova_url), args.nova_chat, args.model, out,
+            max_rounds=args.rounds, approve_tools=not args.ask_tools,
+            nova_db=args.nova_db, max_step_parts=args.max_step_parts,
+            keep_steps=args.keep_steps, check_availability=args.availability,
+            cache_dir=args.cache_dir, client=client,
+        )
+    except (nova.NovaError, PipelineError) as err:
+        print(f"brickpipe: {err}", file=sys.stderr)
+        return 2
+    print()
+    print(("Clean: " if outcome.clean else "Stopped: ") + outcome.stopped_because)
+    if outcome.final_model:
+        print(f"Final model: {outcome.final_model}")
+    print(f"Wrote {out}/ (see loop.md)")
+    return 0 if outcome.clean else 1
+
+
+def main(argv: list[str] | None = None, client: rebrickable.Client | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="brickpipe",
+        description="Turn an LDraw model into a parts list, a BrickLink wanted "
+        "list and a step-ordered file for LPub3D.",
+    )
+    parser.add_argument("model", type=Path, help="LDraw .ldr or .mpd file")
+    parser.add_argument("-o", "--out", type=Path, default=None, help="output folder")
+    parser.add_argument(
+        "--nova-db", type=Path, default=None,
+        help="path to LDraw Nova's data/ldraw-info.db (adds part names, part "
+        "checks, better step ordering and the floating-piece check)",
+    )
+    parser.add_argument(
+        "--max-step-parts", type=int, default=8, help="most pieces per build step"
+    )
+    parser.add_argument(
+        "--keep-steps", action="store_true",
+        help="leave the model's build steps exactly as they are",
+    )
+    parser.add_argument(
+        "--availability", action="store_true",
+        help="check each part and colour against Rebrickable (needs the "
+        f"{rebrickable.KEY_ENV} environment variable; about one request per "
+        "second on the first run, cached afterwards)",
+    )
+    parser.add_argument(
+        "--cache-dir", type=Path, default=None,
+        help="where Rebrickable responses are cached "
+        "(default: ~/.cache/brickpipe/rebrickable)",
+    )
+    parser.add_argument(
+        "--strict", action="store_true", help="exit with status 1 if any error is found"
+    )
+    loop_group = parser.add_argument_group(
+        "repair loop",
+        "send the problems to the LDraw Nova agent that designed the model and "
+        "check what it sends back, repeating until the model is clean",
+    )
+    loop_group.add_argument(
+        "--nova-chat", metavar="CHAT_ID",
+        help="the Nova chat that designed the model ('latest' for the most recent one)",
+    )
+    loop_group.add_argument(
+        "--nova-url", default=nova.DEFAULT_URL, help=f"Nova web app (default {nova.DEFAULT_URL})"
+    )
+    loop_group.add_argument(
+        "--rounds", type=int, default=3, help="most repair rounds to run (default 3)"
+    )
+    loop_group.add_argument(
+        "--ask-tools", action="store_true",
+        help="leave tool approvals to you in the Nova UI instead of granting them",
+    )
+    args = parser.parse_args(argv)
+
+    if args.nova_chat:
+        return run_loop(args, client)
+
+    try:
+        result = run_pipeline(
+            args.model, args.out, nova_db=args.nova_db, max_step_parts=args.max_step_parts,
+            keep_steps=args.keep_steps, check_availability=args.availability,
+            cache_dir=args.cache_dir, client=client,
+        )
+    except PipelineError as err:
+        print(f"brickpipe: {err}", file=sys.stderr)
+        return 2
+    print(result.summary())
+    print(f"Wrote {result.out}/")
+    if result.feedback:
         print("feedback.md lists what the designing agent should repair.")
-    return 1 if (args.strict and errors) else 0
+    return 1 if (args.strict and result.errors) else 0
 
 
 if __name__ == "__main__":
