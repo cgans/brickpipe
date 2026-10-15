@@ -43,6 +43,7 @@ class ProducedModel:
     url: str  # path on the Nova server, e.g. /files/generated/x.mpd
     created_at: float
     parts: int | None
+    image_url: str | None = None  # snapshot, once Nova has rendered it
 
 
 @dataclass
@@ -124,6 +125,30 @@ class Client:
     def create_chat(self, llm_model_id: str | None = None) -> dict:
         return self._request("POST", "/api/chats", {"llm_model_id": llm_model_id})
 
+    def generated_models(self) -> list[dict]:
+        """Every model in Nova's collection, newest first (name, file, parts, image_url)."""
+        return self._request("GET", "/api/models").get("models", [])
+
+    def chat_url(self, chat_id: str) -> str:
+        return f"{self.base_url}/chat/{chat_id}"
+
+    def absolute(self, url: str | None) -> str | None:
+        """A URL Nova returned (usually server-relative) made absolute."""
+        if not url:
+            return None
+        return url if url.startswith("http") else self.base_url + url
+
+    def latest_images(self, chat_id: str, limit: int = 4) -> list[str]:
+        """Images attached to the chat's most recent messages (the agent's renders)."""
+        body = self._request("GET", f"/api/chats/{chat_id}")
+        urls: list[str] = []
+        for message in reversed(body.get("messages", [])):
+            for url in message.get("_image_urls") or []:
+                urls.append(self.absolute(url))
+            if urls:
+                break
+        return urls[:limit]
+
     def is_running(self, chat_id: str) -> bool:
         return bool(self._request("GET", f"/api/chats/{chat_id}")["chat"].get("running"))
 
@@ -141,7 +166,7 @@ class Client:
             out.append(ProducedModel(
                 m["id"], m.get("name", ""), m.get("file", ""),
                 m["model_url"].split("?", 1)[0], float(m.get("created_at", 0)),
-                m.get("parts"),
+                m.get("parts"), m.get("image_url"),
             ))
         return sorted(out, key=lambda m: m.created_at)
 
@@ -195,6 +220,7 @@ class Client:
         self, chat_id: str, approve_tools: bool = True,
         on_event: Callable[[str, dict], None] | None = None,
         timeout: float = TURN_TIMEOUT,
+        stop: Callable[[], bool] = lambda: False,
     ) -> Turn:
         """Follow the event stream until the agent's turn ends.
 
@@ -209,6 +235,9 @@ class Client:
             for event, data in self.events(chat_id):
                 if on_event:
                     on_event(event, data)
+                if stop():
+                    turn.error = "stopped by the user"
+                    return turn
                 if event == "snapshot":
                     if not data.get("running"):
                         turn.finished = True
