@@ -8,13 +8,14 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import availability, bom, checks, connectivity, feedback, inventory, ldraw, nova, rebrickable, steps
+from . import availability, bom, bricklink, checks, connectivity, feedback, inventory, ldraw, nova, prices, rebrickable, steps
 from .catalog import PartCatalog, load_colours
 
 
 def build_report(
     name, pieces, rows, findings, stepped, skipped, catalog_used,
     availability_note=None, has_feedback=False, owned_note=None, connectivity_note=None,
+    price_note=None,
 ) -> str:
     errors = [f for f in findings if f.level == "error"]
     warnings = [f for f in findings if f.level == "warning"]
@@ -39,6 +40,8 @@ def build_report(
         lines += [owned_note, ""]
     if connectivity_note:
         lines += [connectivity_note, ""]
+    if price_note:
+        lines += [price_note, ""]
     for title, group in (("Errors", errors), ("Warnings", warnings)):
         if group:
             lines.append(f"## {title}")
@@ -63,6 +66,8 @@ def build_report(
         lines.append("- `availability.csv`: every part and colour with its status")
     if owned_note:
         lines.append("- `owned.csv`: each lot with how many you have and how many to buy")
+    if price_note:
+        lines.append("- `prices.csv`: BrickLink's price guide for each lot still to buy")
     if has_feedback:
         lines.append(
             "- `feedback.md`: repair request to give to the agent that designed the model"
@@ -86,6 +91,7 @@ class Result:
     findings: list
     feedback: str | None  # the repair request text, or None when clean
     owned: dict | None = None  # need/have/buy totals when an inventory was given
+    price: dict | None = None  # the cost estimate's totals when BrickLink was asked
 
     @property
     def errors(self) -> int:
@@ -114,12 +120,18 @@ def run_pipeline(
     owned_rebrickable_token: str | None = None,
     ldraw_dir: Path | None = None,
     shadow_dir: Path | None = None,
+    pricer: bricklink.Client | None = None,
+    price_options: dict | None = None,
 ) -> Result:
     """Run every check on `model` and write the outputs. Raises PipelineError.
 
     `owned` is an inventory of bricks already in hand; `owned_rebrickable_token`
     fetches one from the user's Rebrickable collection (needs the API client).
-    Either way the wanted list carries only what is left to buy."""
+    Either way the wanted list carries only what is left to buy.
+
+    `pricer` is a BrickLink client; with it, what is left to buy is priced
+    from BrickLink's price guide (`price_options`: guide_type, new_or_used,
+    region, currency)."""
     model = Path(model)
     try:
         doc = ldraw.load(model)
@@ -252,6 +264,15 @@ def run_pipeline(
             owned_note += (" Rebrickable parts could only be matched by id; run with "
                            "--availability for colour-aware matching.")
 
+    price_note = None
+    price_summary = None
+    if pricer is not None:
+        est = prices.estimate(rows_to_buy, colours, pricer, overrides, **(price_options or {}))
+        findings += prices.findings(est)
+        price_note = prices.note(est)
+        price_summary = est.summary()
+        (out / "prices.csv").write_text(prices.to_csv(est), encoding="utf-8")
+
     xml, skipped = bom.to_bricklink_xml(rows_to_buy, colours, overrides)
     (out / "parts.csv").write_text(bom.to_csv(rows, colours, catalog), encoding="utf-8")
     (out / "bricklink_wanted.xml").write_text(xml, encoding="utf-8")
@@ -265,14 +286,14 @@ def run_pipeline(
         feedback_path.unlink()  # an earlier run's request no longer applies
     report = build_report(
         name, pieces, rows, findings, stepped, skipped, bool(catalog),
-        availability_note, bool(request), owned_note, connectivity_note,
+        availability_note, bool(request), owned_note, connectivity_note, price_note,
     )
     (out / "report.md").write_text(report, encoding="utf-8")
 
     if catalog:
         catalog.close()
 
-    return Result(name, out, len(pieces), len(rows), findings, request, owned_summary)
+    return Result(name, out, len(pieces), len(rows), findings, request, owned_summary, price_summary)
 
 
 def rebrickable_login(client: rebrickable.Client | None) -> int:
@@ -292,7 +313,24 @@ def rebrickable_login(client: rebrickable.Client | None) -> int:
     return 0
 
 
-def run_loop(args, client: rebrickable.Client | None, owned=None, user_token=None) -> int:
+def price_setup(args) -> tuple[bricklink.Client | None, dict]:
+    """The BrickLink client and options from --prices and its companions."""
+    if not args.prices:
+        return None, {}
+    creds = bricklink.Credentials.from_env()
+    if creds is None:
+        raise PipelineError(
+            "--prices needs the four BrickLink variables: " + ", ".join(bricklink.ENV.values())
+            + " (from bricklink.com/v2/api/register_consumer.page)"
+        )
+    options = {"guide_type": "sold" if args.price_sold else "stock",
+               "new_or_used": "U" if args.price_used else "N",
+               "region": args.price_region or "", "currency": args.price_currency or ""}
+    return bricklink.Client(creds, cache_dir=bricklink.default_cache_dir()), options
+
+
+def run_loop(args, client: rebrickable.Client | None, owned=None, user_token=None,
+             pricer=None, price_options=None) -> int:
     from . import loop
 
     out = args.out or args.model.with_name(f"{args.model.stem}-repair")
@@ -304,6 +342,7 @@ def run_loop(args, client: rebrickable.Client | None, owned=None, user_token=Non
             keep_steps=args.keep_steps, check_availability=args.availability,
             cache_dir=args.cache_dir, client=client, ldraw_dir=args.ldraw_dir,
             owned=owned, owned_rebrickable_token=user_token,
+            pricer=pricer, price_options=price_options,
         )
     except (nova.NovaError, PipelineError) as err:
         print(f"brickpipe: {err}", file=sys.stderr)
@@ -372,6 +411,21 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
         "--rebrickable-login", action="store_true",
         help="sign in to Rebrickable once and print a user token for --owned-rebrickable",
     )
+    price_group = parser.add_argument_group(
+        "price estimate",
+        "ask BrickLink's price guide what the wanted list would cost (needs the four "
+        + ", ".join(bricklink.ENV.values()) + " variables from "
+        "bricklink.com/v2/api/register_consumer.page; the token must be issued for "
+        "this computer's public IP address)",
+    )
+    price_group.add_argument("--prices", action="store_true", help="estimate the cost of what is left to buy")
+    price_group.add_argument("--price-region", default="", metavar="REGION",
+                             help="only sellers in a region: north_america, europe, eu, asia, oceania, …")
+    price_group.add_argument("--price-currency", default="", metavar="CODE",
+                             help="currency code such as USD (default: your BrickLink profile's)")
+    price_group.add_argument("--price-used", action="store_true", help="price used parts instead of new")
+    price_group.add_argument("--price-sold", action="store_true",
+                             help="use the last six months of sales instead of current listings")
     parser.add_argument(
         "--strict", action="store_true", help="exit with status 1 if any error is found"
     )
@@ -423,8 +477,14 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
     if user_token and not args.availability:
         args.availability = True  # the collection is matched through Rebrickable's ids
 
+    try:
+        pricer, price_options = price_setup(args)
+    except PipelineError as err:
+        print(f"brickpipe: {err}", file=sys.stderr)
+        return 2
+
     if args.nova_chat:
-        return run_loop(args, client, owned, user_token)
+        return run_loop(args, client, owned, user_token, pricer, price_options)
 
     try:
         result = run_pipeline(
@@ -432,6 +492,7 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
             keep_steps=args.keep_steps, check_availability=args.availability,
             cache_dir=args.cache_dir, client=client, ldraw_dir=args.ldraw_dir,
             owned=owned, owned_rebrickable_token=user_token,
+            pricer=pricer, price_options=price_options,
         )
     except PipelineError as err:
         print(f"brickpipe: {err}", file=sys.stderr)
@@ -440,6 +501,8 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
     if result.owned:
         o = result.owned
         print(f"You have {o['have']} of {o['need']} pieces; {o['buy']} to buy.")
+    if result.price and not result.price.get("error"):
+        print(f"Estimated cost: about {result.price['total']} {result.price['currency']}.")
     print(f"Wrote {result.out}/")
     if result.feedback:
         print("feedback.md lists what the designing agent should repair.")

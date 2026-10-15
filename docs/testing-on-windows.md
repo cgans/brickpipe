@@ -18,6 +18,7 @@ launcher, use `python` instead; the setup check tells you which one works.
 | An AI provider key (OpenAI, Anthropic or OpenRouter) | Nova's agent | from the provider |
 | A Rebrickable key | `--availability` | free: rebrickable.com > Account > Settings > API |
 | A BrickLink account | uploading the wanted list | free |
+| BrickLink API values | the price estimate | free: [register_consumer.page](https://www.bricklink.com/v2/api/register_consumer.page), see step 3b |
 
 Close and reopen PowerShell after installing anything, so it is found.
 
@@ -54,6 +55,31 @@ Import-Csv out\availability.csv | Format-Table
 
 It takes under ten seconds. Every row should have a status. The key lasts
 until you close the window; nothing is written to disk.
+
+## 3b. Live-test the price estimate
+
+Log in to BrickLink and open
+<https://www.bricklink.com/v2/api/register_consumer.page>. Register a
+consumer (any name; it gives a consumer key and secret), then add an access
+token for your computer's public IP address, which this prints:
+
+```powershell
+(Invoke-WebRequest ifconfig.me/ip).Content
+```
+
+Then, in the same window as the Rebrickable key:
+
+```powershell
+$env:BRICKLINK_CONSUMER_KEY = "..."; $env:BRICKLINK_CONSUMER_SECRET = "..."
+$env:BRICKLINK_TOKEN = "..."; $env:BRICKLINK_TOKEN_SECRET = "..."
+py -3 -m brickpipe examples\garden-shed.mpd -o out --availability --prices --price-region north_america --price-currency USD
+Import-Csv out\prices.csv | Format-Table
+```
+
+The report ends with the estimated cost. If BrickLink says the token is not
+valid for this address, your public IP has changed since you added the token;
+add another on the same page. On the page, the same four values go under
+Settings, Prices (BrickLink).
 
 ## 4. Install LDraw Nova
 
@@ -188,6 +214,8 @@ docker compose down
 | `Nova database not found` | Wrong `--nova-db` path | The three folders must sit side by side; check with `dir ..\ldraw-nova\data\ldraw-info.db` |
 | `Availability check did not run: No API key` | The key is not set in this window | Set `$env:REBRICKABLE_API_KEY` again; it does not survive closing PowerShell |
 | `Rebrickable rejected the API key` | Wrong or regenerated key | Copy the key again from your Rebrickable settings |
+| `BrickLink refused the access token for this computer's address` | Your public IP changed since the token was issued | Add a token for the new address at bricklink.com/v2/api/register_consumer.page |
+| `BrickLink rejected the credentials` | One of the four values is wrong | Paste all four again; the consumer secret and token secret are the long ones |
 | LPub3D cannot find parts | It has not downloaded the LDraw library | Accept its offer to download the library on first start |
 | LPub3D will not start from the zip | It was run from inside the zip | Extract the whole zip first, then run `LPub3D.exe` from the extracted folder |
 

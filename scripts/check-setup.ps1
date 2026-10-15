@@ -91,6 +91,17 @@ else {
         "Free key: rebrickable.com > Account > Settings > API")
 }
 
+$bl = @("BRICKLINK_CONSUMER_KEY", "BRICKLINK_CONSUMER_SECRET", "BRICKLINK_TOKEN", "BRICKLINK_TOKEN_SECRET")
+$blSet = @($bl | Where-Object { [Environment]::GetEnvironmentVariable($_) })
+if ($blSet.Count -eq 4) { Pass "BrickLink API" "all four values set for this window" }
+elseif ($blSet.Count -eq 0) {
+    Warn "BrickLink API" "not set; needed only for --prices (the page has its own fields)" @(
+        "Register at bricklink.com/v2/api/register_consumer.page, add a token for your public IP, then set",
+        '  $env:BRICKLINK_CONSUMER_KEY, $env:BRICKLINK_CONSUMER_SECRET, $env:BRICKLINK_TOKEN, $env:BRICKLINK_TOKEN_SECRET')
+} else {
+    Warn "BrickLink API" "only $($blSet.Count) of the four values are set" @("Missing: " + (($bl | Where-Object { $_ -notin $blSet }) -join ", "))
+}
+
 # --- Needed to run LDraw Nova -----------------------------------------------
 
 $docker = Run "docker" @("--version")

@@ -26,13 +26,13 @@ from pathlib import Path
 import urllib.parse
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import connectivity, inventory, loop, nova, rebrickable
+from . import bricklink, connectivity, inventory, loop, nova, rebrickable
 from .catalog import load_colours
 from .cli import PipelineError, run_pipeline
 
 DEFAULT_PORT = 8766
 RUN_FILES = ("report.md", "feedback.md", "parts.csv", "bricklink_wanted.xml",
-             "flat.ldr", "instructions.mpd", "availability.csv")
+             "flat.ldr", "instructions.mpd", "availability.csv", "owned.csv", "prices.csv")
 
 DESIGN_MESSAGE_SUFFIX = (
     "\n\nWhen the model is finished, deliver it as an .mpd. It will be checked "
@@ -76,8 +76,9 @@ class Run:
 
     def public(self) -> dict:
         req = {k: v for k, v in self.request.items()
-               if k not in ("rebrickable_key", "rebrickable_user_token")}
+               if k not in ("rebrickable_key", "rebrickable_user_token", "bricklink")}
         req["availability"] = bool(self.request.get("rebrickable_key"))
+        req["prices"] = bricklink.Credentials.from_dict(self.request.get("bricklink") or {}) is not None
         req["owned_from_rebrickable"] = bool(self.request.get("rebrickable_user_token"))
         req["owned_lines"] = len([ln for ln in (self.request.get("owned_text") or "").splitlines() if ln.strip()])
         return {
@@ -172,6 +173,13 @@ class Runner:
         client = rebrickable.Client(key=key, cache_dir=rebrickable.default_cache_dir()) if key else None
         nova_db = Path(req["nova_db"]) if req.get("nova_db") else None
         ldraw_dir = Path(req["ldraw_dir"]) if req.get("ldraw_dir") else None
+        creds = bricklink.Credentials.from_dict(req.get("bricklink") or {})
+        pricer = bricklink.Client(creds, cache_dir=bricklink.default_cache_dir()) if creds else None
+        price_options = {
+            "guide_type": "sold" if req.get("price_guide") == "sold" else "stock",
+            "new_or_used": "U" if req.get("price_condition") == "U" else "N",
+            "region": req.get("price_region") or "", "currency": req.get("price_currency") or "",
+        }
 
         def set_status(status: str, phase: str = "") -> None:
             run.status, run.phase = status, phase
@@ -262,13 +270,14 @@ class Runner:
                 stop=lambda: run.stop_requested,
                 nova_db=nova_db, check_availability=bool(client), client=client,
                 owned=owned, owned_rebrickable_token=user_token if client else None,
-                ldraw_dir=ldraw_dir,
+                ldraw_dir=ldraw_dir, pricer=pricer, price_options=price_options,
             )
             last = next((r for r in reversed(outcome.rounds) if r.result), None)
             run.result = {
                 "clean": outcome.clean, "reason": outcome.stopped_because,
                 "final_model": outcome.final_model.name if outcome.final_model else None,
                 "owned": last.result.owned if last else None,
+                "price": last.result.price if last else None,
             }
             run.status = "stopped" if run.stop_requested else "done"
             models = produced()  # snapshots may have finished rendering since
