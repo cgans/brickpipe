@@ -114,8 +114,12 @@ def subtract(
     rows: list[BomRow],
     inventory: Inventory,
     aliases: dict[tuple[str, int], tuple[str | None, int | None, str | None]] | None = None,
+    leftover: dict[tuple[str, int], int] | None = None,
 ) -> list[Covered]:
     """How much of each lot the inventory covers.
+
+    If `leftover` is given, it is filled with the typed/CSV entries (LDraw
+    keys) that no lot used, so a typo or wrong colour does not go unnoticed.
 
     `aliases` maps (LDraw part, LDraw colour) to (Rebrickable part_num,
     Rebrickable colour id, BrickLink part id) when known from the availability
@@ -151,10 +155,14 @@ def subtract(
                 rb[key] = got - take
                 have += take
         out.append(Covered(row, have))
+    if leftover is not None:
+        leftover.update({k: v for k, v in ldraw.items() if v > 0})
     return out
 
 
-def to_csv(covered: list[Covered], colours: dict[int, Colour]) -> str:
+def to_csv(covered: list[Covered], colours: dict[int, Colour],
+           leftover: dict[tuple[str, int], int] | None = None) -> str:
+    """Rows with need 0 at the end are listed bricks the model does not use."""
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
     writer.writerow(["ldraw_part", "ldraw_colour", "colour_name", "need", "have", "buy"])
@@ -162,6 +170,10 @@ def to_csv(covered: list[Covered], colours: dict[int, Colour]) -> str:
         colour = colours.get(c.row.colour)
         writer.writerow([c.row.part, c.row.colour, colour.name if colour else "",
                          c.row.quantity, c.have, c.buy])
+    for (part, code), qty in sorted((leftover or {}).items()):
+        colour = colours.get(code)
+        writer.writerow([part, code, colour.name if colour else ("any" if code == -1 else ""),
+                         0, qty, 0])
     return out.getvalue()
 
 
@@ -169,9 +181,11 @@ def remaining_rows(covered: list[Covered]) -> list[BomRow]:
     return [BomRow(c.row.part, c.row.colour, c.buy) for c in covered if c.buy > 0]
 
 
-def summary(covered: list[Covered]) -> dict:
+def summary(covered: list[Covered], leftover: dict[tuple[str, int], int] | None = None) -> dict:
     need = sum(c.row.quantity for c in covered)
     have = sum(c.have for c in covered)
     return {"need": need, "have": have, "buy": need - have,
             "lots_covered": sum(1 for c in covered if c.buy == 0),
-            "lots_total": len(covered)}
+            "lots_total": len(covered),
+            "unused": sum((leftover or {}).values()),
+            "unused_lots": len(leftover or {})}
