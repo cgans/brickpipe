@@ -46,7 +46,8 @@ def build_report(
     lines += [
         "## Files",
         "- `parts.csv`: full parts list",
-        "- `bricklink_wanted.xml`: upload at BrickLink > Want > Upload",
+        "- `bricklink_wanted.xml`: paste its contents into the XML box at "
+        "BrickLink > Want > Upload",
         "- `flat.ldr`: every piece in one model; upload to Rebrickable or BrickLink "
         "to let them match parts and colours themselves",
         "- `instructions.mpd`: the model with build steps; open in LPub3D",
@@ -97,9 +98,13 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
     )
     args = parser.parse_args(argv)
 
-    doc = ldraw.load(args.model)
+    try:
+        doc = ldraw.load(args.model)
+        catalog = PartCatalog(args.nova_db) if args.nova_db else None
+    except (OSError, ValueError) as err:
+        print(f"brickpipe: {err}", file=sys.stderr)
+        return 2
     colours = load_colours()
-    catalog = PartCatalog(args.nova_db) if args.nova_db else None
 
     pieces, problems = ldraw.flatten(doc)
     if not pieces:
@@ -172,6 +177,9 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
         availability_note, bool(request),
     )
     (out / "report.md").write_text(report, encoding="utf-8")
+
+    if catalog:
+        catalog.close()
 
     errors = sum(1 for f in findings if f.level == "error")
     warnings = len(findings) - errors

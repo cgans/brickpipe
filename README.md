@@ -7,7 +7,7 @@ to actually build it:
 | File | What it is |
 |---|---|
 | `parts.csv` | Every part and colour with quantities |
-| `bricklink_wanted.xml` | Wanted list for BrickLink (Want > Upload) |
+| `bricklink_wanted.xml` | Wanted list for BrickLink; paste its contents into the XML box at Want > Upload |
 | `flat.ldr` | All pieces in one model with no submodels, for upload to Rebrickable or BrickLink |
 | `instructions.mpd` | The model with build steps of at most 8 pieces, ready for LPub3D |
 | `report.md` | Piece counts and every problem found |
@@ -76,6 +76,9 @@ steps untouched, `--strict` to exit with status 1 when an error is found.
 Tests: `python -m unittest discover -s tests`
 
 ## End-to-end test run
+
+On Windows, follow [docs/testing-on-windows.md](docs/testing-on-windows.md),
+which adds a setup check and the Windows-specific commands.
 
 1. **Install LDraw Nova** (needs Git and Docker, about 5 GB of disk):
 
