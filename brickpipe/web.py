@@ -64,6 +64,9 @@ class Run:
     started_at: float = field(default_factory=time.time)
     finished_at: float | None = None
     log: list[str] = field(default_factory=list)
+    agent_text: str = ""  # what the agent is saying right now (this turn)
+    tools_running: dict = field(default_factory=dict)
+    events_seen: int = 0
     stop_requested: bool = False
     subscribers: list[queue.Queue] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -75,7 +78,8 @@ class Run:
             "id": self.id, "status": self.status, "phase": self.phase,
             "chat_id": self.chat_id, "chat_url": self.chat_url, "rounds": self.rounds,
             "result": self.result, "error": self.error, "started_at": self.started_at,
-            "finished_at": self.finished_at, "log": self.log[-200:], "request": req,
+            "finished_at": self.finished_at, "log": self.log[-300:], "request": req,
+            "agent_text": self.agent_text[-4000:], "events_seen": self.events_seen,
             "files": sorted(p.name for p in self.final_dir().iterdir()) if self.final_dir() else [],
         }
 
@@ -152,15 +156,38 @@ class Runner:
             run.status, run.phase = status, phase
             run.emit("status", {"status": status, "phase": phase})
 
+        last_text_emit = [0.0]
+
         def on_event(event: str, data: dict) -> None:
+            run.events_seen += 1
             if event == "progress" and data.get("summary"):
                 run.phase = str(data["summary"])[:200]
+                run.note(f"Nova: {run.phase}")
                 run.emit("phase", {"phase": run.phase})
             elif event == "tool_start":
-                run.phase = nova_phase(data.get("name", ""))
+                name = data.get("name", "")
+                run.tools_running[data.get("id", name)] = name
+                run.phase = nova_phase(name)
+                run.note(f"Agent started: {name}")
                 run.emit("phase", {"phase": run.phase})
+            elif event == "tool_end":
+                run.tools_running.pop(data.get("id"), None)
+                run.note(f"Agent finished: {data.get('name', '')}")
+            elif event == "text" and data.get("delta"):
+                run.agent_text = (run.agent_text + str(data["delta"]))[-8000:]
+                now = time.monotonic()
+                if now - last_text_emit[0] > 0.4 or "\n" in data["delta"]:
+                    last_text_emit[0] = now
+                    run.emit("agent_text", {"text": run.agent_text[-4000:]})
+            elif event == "model":
+                run.note(f"Nova published model: {data.get('name', '')}")
+            elif event == "turn_error":
+                run.note(f"Nova reported an error: {data.get('message', '')}")
 
         def on_round(rnd: loop.Round) -> None:
+            if rnd.sent and not rnd.turn:
+                run.agent_text = ""  # a new turn is starting
+                run.emit("agent_text", {"text": ""})
             entry = round_dict(rnd)
             run.rounds = [r for r in run.rounds if r["number"] != entry["number"]] + [entry]
             run.rounds.sort(key=lambda r: r["number"])
@@ -204,6 +231,7 @@ class Runner:
             run.chat_id, run.chat_url = chat["id"], agent.chat_url(chat["id"])
             run.emit("chat", {"chat_id": run.chat_id, "chat_url": run.chat_url})
             run.note(f"Asked Nova to design: {req['prompt'][:120]}")
+            run.agent_text = ""
             agent.send(chat["id"], req["prompt"] + DESIGN_MESSAGE_SUFFIX,
                        options={"mode": "agent", "permissions": "full"})
             set_status("designing", "The agent is designing the model")
