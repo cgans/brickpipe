@@ -193,6 +193,11 @@ stands up, and whether a part that exists is in stock or affordable today.
 1. Stud-level connectivity for ordinary bricks and plates.
 2. Price estimate per model.
 
+## Notes for Nova
+
+Things found along the way that belong upstream in LDraw Nova rather than
+here are collected in [docs/nova-upstream-notes.md](docs/nova-upstream-notes.md).
+
 ## Licence note
 
 brickpipe contains no LDraw Nova code or data; it only reads Nova's output and,
