@@ -166,7 +166,7 @@ ul.history button:hover b { text-decoration: underline; }
 <body>
 <header>
   <div>
-    <h1>brickpipe</h1>
+    <h1>brickpipe <span class="small muted" id="version" style="font-weight:400"></span></h1>
     <p class="muted">Describe a model. Nova designs it, brickpipe checks that every piece can be bought, and the two go back and forth until it can. You get the shopping list and the instructions.</p>
   </div>
   <button class="btn quiet" id="themeBtn" type="button" title="Switch light and dark">Theme</button>
@@ -313,6 +313,7 @@ ul.history button:hover b { text-decoration: underline; }
   // settings
   async function loadSettings() {
     const s = await api('/api/settings');
+    $('version').textContent = s.version ? 'v' + s.version : '';
     $('novaUrl').value = store.get('nova_url', '') || s.nova_url;
     $('novaDb').value = store.get('nova_db', '') || s.nova_db;
     $('rounds').value = store.get('rounds', '') || s.rounds;

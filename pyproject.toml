@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "brickpipe"
-version = "0.1.0"
+version = "0.2.0"
 description = "Turn an LDraw model into a parts list, a BrickLink wanted list and build steps"
 readme = "README.md"
 requires-python = ">=3.10"

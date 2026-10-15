@@ -471,7 +471,9 @@ def make_server(port: int = DEFAULT_PORT, runs_dir: Path | None = None,
     here = Path.cwd()
     handler = type("BoundHandler", (Handler,), {})
     handler.runner = Runner(runs_dir or here / "runs")
+    from . import __version__
     handler.settings = {
+        "version": __version__,
         "nova_url": nova_url,
         "nova_db": nova_db if nova_db is not None else guess_nova_db(here),
         "rounds": 3,
@@ -492,9 +494,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args(argv)
 
-    server = make_server(args.port, args.runs_dir, args.nova_url, args.nova_db)
+    try:
+        server = make_server(args.port, args.runs_dir, args.nova_url, args.nova_db)
+    except OSError as err:
+        print(f"brickpipe: could not listen on port {args.port} ({err}).\n"
+              "Another brickpipe page is probably still running: close its window, "
+              "or start this one with --port 8767.")
+        return 1
     url = f"http://localhost:{args.port}"
-    print(f"brickpipe is at {url}  (Ctrl+C to stop)")
+    from . import __version__
+    print(f"brickpipe {__version__} is at {url}  (Ctrl+C to stop)")
     if not args.no_browser:
         webbrowser.open(url)
     try:
