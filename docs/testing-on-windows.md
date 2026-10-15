@@ -13,6 +13,7 @@ launcher, use `python` instead; the setup check tells you which one works.
 | Git | getting the code | `winget install --id Git.Git -e` |
 | Python 3.10 or newer | running brickpipe | `winget install --id Python.Python.3.13 -e` |
 | Docker Desktop | running LDraw Nova | `winget install --id Docker.DockerDesktop -e` |
+| LDraw part library | the check that pieces clip together | `py -3 -m brickpipe --get-ldraw`, or the button in the page's settings |
 | LPub3D | viewing the build instructions | portable zip from [its releases page](https://github.com/trevorsandy/lpub3d/releases/latest); see step 8 |
 | An AI provider key (OpenAI, Anthropic or OpenRouter) | Nova's agent | from the provider |
 | A Rebrickable key | `--availability` | free: rebrickable.com > Account > Settings > API |

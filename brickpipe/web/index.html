@@ -248,6 +248,15 @@ ul.history button:hover b { text-decoration: underline; }
             <input id="novaDb" type="text" placeholder="C:\…\ldraw-nova\data\ldraw-info.db">
           </div>
           <div>
+            <label for="ldrawDir">LDraw part library</label>
+            <input id="ldrawDir" type="text" placeholder="complete.zip, or a folder with parts\ and p\">
+            <p class="small muted">With Nova's database, enables the check that pieces actually clip together.</p>
+            <div class="row" style="margin-top:6px">
+              <button class="btn quiet small" id="ldrawGet" type="button">Download the library (about 150 MB, from ldraw.org)</button>
+              <span class="small muted" id="ldrawState"></span>
+            </div>
+          </div>
+          <div>
             <label for="rounds">Most repair rounds</label>
             <input id="rounds" type="number" min="0" max="10" value="3" style="width:6em">
           </div>
@@ -352,13 +361,16 @@ ul.history button:hover b { text-decoration: underline; }
     $('version').textContent = s.version ? 'v' + s.version : '';
     $('novaUrl').value = store.get('nova_url', '') || s.nova_url;
     $('novaDb').value = store.get('nova_db', '') || s.nova_db;
+    $('ldrawDir').value = store.get('ldraw_dir', '') || s.ldraw_dir || '';
+    $('ldrawGet').hidden = !!$('ldrawDir').value;
+    if (!$('ldrawDir').value) $('settings').open = true;
     $('rounds').value = store.get('rounds', '') || s.rounds;
     $('rebrickableKey').value = store.get('rebrickable_key', '');
     $('ownedText').value = store.get('owned_text', '');
     rbRender();
     if (!$('rebrickableKey').value) $('settings').open = true;
   }
-  for (const [id, key] of [['novaUrl', 'nova_url'], ['novaDb', 'nova_db'], ['rounds', 'rounds'], ['rebrickableKey', 'rebrickable_key'], ['ownedText', 'owned_text']]) {
+  for (const [id, key] of [['novaUrl', 'nova_url'], ['novaDb', 'nova_db'], ['ldrawDir', 'ldraw_dir'], ['rounds', 'rounds'], ['rebrickableKey', 'rebrickable_key'], ['ownedText', 'owned_text']]) {
     $(id).addEventListener('change', () => store.set(key, $(id).value.trim()));
   }
 
@@ -378,6 +390,27 @@ ul.history button:hover b { text-decoration: underline; }
     finally { $('rbLogin').disabled = false; }
   };
   $('rbLogout').onclick = () => { store.set('rebrickable_user_token', ''); rbRender(); };
+
+  $('ldrawGet').onclick = async () => {
+    $('ldrawGet').disabled = true;
+    await api('/api/ldraw/download', { method: 'POST' });
+    const tick = async () => {
+      const s = await api('/api/settings');
+      const d = s.ldraw_download || {};
+      if (d.state === 'running') {
+        const mb = n => (n / 1048576).toFixed(0);
+        $('ldrawState').textContent = d.total ? `Downloading… ${mb(d.done)} of ${mb(d.total)} MB` : `Downloading… ${mb(d.done)} MB`;
+        setTimeout(tick, 1000);
+      } else if (d.state === 'done') {
+        $('ldrawState').textContent = 'Downloaded. The connectivity check is on.';
+        $('ldrawDir').value = d.path; store.set('ldraw_dir', d.path); $('ldrawGet').hidden = true;
+      } else {
+        $('ldrawState').textContent = 'Download failed: ' + (d.error || 'unknown error');
+        $('ldrawGet').disabled = false;
+      }
+    };
+    tick();
+  };
 
   async function loadNova() {
     const q = '?nova_url=' + encodeURIComponent($('novaUrl').value.trim());
@@ -405,7 +438,7 @@ ul.history button:hover b { text-decoration: underline; }
     e.preventDefault();
     $('formError').textContent = '';
     const body = {
-      nova_url: $('novaUrl').value.trim(), nova_db: $('novaDb').value.trim(),
+      nova_url: $('novaUrl').value.trim(), nova_db: $('novaDb').value.trim(), ldraw_dir: $('ldrawDir').value.trim(),
       rounds: Number($('rounds').value) || 3, rebrickable_key: $('rebrickableKey').value.trim(),
       owned_text: $('ownedText').value.trim(), rebrickable_user_token: store.get('rebrickable_user_token', ''),
     };

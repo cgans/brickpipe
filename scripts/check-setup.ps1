@@ -116,16 +116,19 @@ if (-not $docker) {
     }
 }
 
+$novaBuilt = $false
+try { $novaBuilt = [bool](docker image inspect ldraw-nova-app 2>$null) } catch {}
 try {
     $drive = (Get-Item (Get-Location).Path).PSDrive
     $freeGb = [math]::Round($drive.Free / 1GB, 1)
-    if ($freeGb -ge 15) { Pass "Disk space" "$freeGb GB free on $($drive.Name):" }
-    elseif ($freeGb -ge 8) {
+    if ($novaBuilt) { Pass "Disk space" "$freeGb GB free on $($drive.Name): (Nova's image is already built)" }
+    elseif ($freeGb -ge 20) { Pass "Disk space" "$freeGb GB free on $($drive.Name):" }
+    elseif ($freeGb -ge 10) {
         Warn "Disk space" "$freeGb GB free on $($drive.Name): is tight; Nova's image needs about 5 GB" @(
             "Free some space, or run  docker system prune  to clear old images.")
     } else {
-        Fail "Disk space" "$freeGb GB free on $($drive.Name): is not enough for Nova's image" @(
-            "Free at least 8 GB before building.")
+        Fail "Disk space" "$freeGb GB free on $($drive.Name): is not enough to build Nova's image" @(
+            "Free about 20 GB before building; the build needs room for the image twice over.")
     }
 } catch { Warn "Disk space" "could not be measured" @() }
 
@@ -170,6 +173,32 @@ if ((Test-Path $nova) -and (Test-Path $novaDocker)) {
 } else {
     Fail "Nova folders" "ldraw-nova and ldraw-nova-docker are not next to brickpipe" $cloneFix
 }
+
+# --- Needed for the stud connectivity check ----------------------------------
+
+$ldraw = $null
+if ($env:LDRAW_DIR -and (Test-Path $env:LDRAW_DIR)) { $ldraw = $env:LDRAW_DIR }
+if (-not $ldraw) {
+    foreach ($candidate in @(
+        "$env:LOCALAPPDATA\brickpipe\ldraw\complete.zip",
+        "$env:LOCALAPPDATA\LPub3D Software\LPub3D\libraries\complete.zip",
+        (Get-ChildItem -Path "$env:USERPROFILE\Desktop", "$env:USERPROFILE\Downloads" -Directory -Filter "LPub3D*" -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName "libraries\complete.zip" } | Select-Object -First 1),
+        "$env:USERPROFILE\ldraw", "$env:USERPROFILE\LDraw", "C:\LDraw",
+        "C:\Users\Public\Documents\LDraw", (Join-Path $parent "ldraw"))) {
+        if ($candidate -and (Test-Path $candidate)) { $ldraw = $candidate; break }
+    }
+}
+if ($ldraw) { Pass "LDraw part library" $ldraw }
+else {
+    Warn "LDraw part library" "not found; needed for the check that pieces clip together" @(
+        "Get it with:  py -3 -m brickpipe --get-ldraw   (about 150 MB, from ldraw.org)",
+        "or press 'Download the library' in the page's settings.",
+        "Already have one elsewhere? Set `$env:LDRAW_DIR to the folder or the zip.")
+}
+
+$shadow = Join-Path $nova "data\offLibShadow\parts"
+if ((Test-Path $nova) -and (Test-Path $shadow)) { Pass "Nova shadow library" "found (connector data)" }
+elseif (Test-Path $nova) { Warn "Nova shadow library" "missing from the Nova clone; connectivity cannot be checked" $cloneFix }
 
 # --- Needed to view the results ---------------------------------------------
 
