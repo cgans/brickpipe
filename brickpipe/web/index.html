@@ -196,11 +196,11 @@ ul.history button:hover b { text-decoration: underline; }
             <label for="modelFile">Model in Nova's collection</label>
             <select id="modelFile"><option value="">Loading…</option></select>
           </div>
-          <div>
+          <div id="chatPick">
             <label for="chatId">The chat that designed it</label>
             <select id="chatId"><option value="latest">Most recent chat</option></select>
-            <p class="small muted">Repairs are sent to this chat, so the agent keeps its memory of the design.</p>
           </div>
+          <p class="small muted" id="chatNote">Repairs go to the chat that designed the model, so the agent keeps its memory of the design.</p>
         </div>
       </details>
 
@@ -366,14 +366,46 @@ ul.history button:hover b { text-decoration: underline; }
     tick();
   };
 
+  // The model decides the chat: Nova records which chat produced each model.
+  let novaModels = [], novaChats = [];
+  function chatOptions(list, first) {
+    return (first ? `<option value="latest">${esc(first)}</option>` : '') +
+      list.map(x => `<option value="${esc(x.id)}">${esc(x.title || x.id)}</option>`).join('');
+  }
+  function syncChat() {
+    const file = $('modelFile').value;
+    const model = novaModels.find(x => x.file === file);
+    const chats = model ? (model.chats || []) : [];
+    const titled = chats.map(ch => ({ id: ch.id, title: (novaChats.find(c => c.id === ch.id) || ch).title }));
+    if (!model) {
+      $('chatPick').hidden = false;
+      $('chatId').innerHTML = chatOptions(novaChats, 'Most recent chat');
+      $('chatNote').textContent = 'Pick a model, or leave it to use the newest model from the chosen chat.';
+    } else if (titled.length === 1) {
+      $('chatPick').hidden = true;
+      $('chatId').innerHTML = chatOptions(titled, null);
+      $('chatId').value = titled[0].id;
+      $('chatNote').textContent = 'Repairs go to the chat that designed it: ' + (titled[0].title || titled[0].id) + '.';
+    } else if (titled.length > 1) {
+      $('chatPick').hidden = false;
+      $('chatId').innerHTML = chatOptions(titled, null);
+      $('chatNote').textContent = 'This model came from more than one chat; pick the one to send repairs to.';
+    } else {
+      $('chatPick').hidden = false;
+      $('chatId').innerHTML = chatOptions(novaChats, 'Most recent chat');
+      $('chatNote').textContent = 'Nova does not record which chat made this model; pick the one to send repairs to.';
+    }
+  }
+  $('modelFile').addEventListener('change', syncChat);
+
   async function loadNova() {
     const q = '?nova_url=' + encodeURIComponent($('novaUrl').value.trim());
     try {
       const [m, c] = await Promise.all([api('/api/nova/models' + q), api('/api/nova/chats' + q)]);
+      novaModels = m.models; novaChats = c.chats;
       $('modelFile').innerHTML = '<option value="">Newest model from the chosen chat</option>' +
         m.models.map(x => `<option value="${esc(x.file)}">${esc(x.name)}${x.parts ? ' (' + x.parts + ' parts)' : ''}</option>`).join('');
-      $('chatId').innerHTML = '<option value="latest">Most recent chat</option>' +
-        c.chats.map(x => `<option value="${esc(x.id)}">${esc(x.title || x.id)}</option>`).join('');
+      syncChat();
       $('novaState').textContent = `Nova is up: ${m.models.length} model(s), ${c.chats.length} chat(s)`;
       $('novaState').classList.remove('err');
     } catch (e) {
