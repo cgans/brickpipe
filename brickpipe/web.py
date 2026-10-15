@@ -26,7 +26,8 @@ from pathlib import Path
 import urllib.parse
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import connectivity, loop, nova, rebrickable
+from . import connectivity, inventory, loop, nova, rebrickable
+from .catalog import load_colours
 from .cli import PipelineError, run_pipeline
 
 DEFAULT_PORT = 8766
@@ -74,8 +75,11 @@ class Run:
     lock: threading.Lock = field(default_factory=threading.Lock)
 
     def public(self) -> dict:
-        req = {k: v for k, v in self.request.items() if k != "rebrickable_key"}
+        req = {k: v for k, v in self.request.items()
+               if k not in ("rebrickable_key", "rebrickable_user_token")}
         req["availability"] = bool(self.request.get("rebrickable_key"))
+        req["owned_from_rebrickable"] = bool(self.request.get("rebrickable_user_token"))
+        req["owned_lines"] = len([ln for ln in (self.request.get("owned_text") or "").splitlines() if ln.strip()])
         return {
             "id": self.id, "status": self.status, "phase": self.phase,
             "chat_id": self.chat_id, "chat_url": self.chat_url, "rounds": self.rounds,
@@ -163,6 +167,8 @@ class Runner:
         req = run.request
         agent = nova.Client(req.get("nova_url") or nova.DEFAULT_URL)
         key = req.get("rebrickable_key") or ""
+        owned = inventory.from_text(req["owned_text"], load_colours()) if req.get("owned_text") else None
+        user_token = (req.get("rebrickable_user_token") or "").strip() or None
         client = rebrickable.Client(key=key, cache_dir=rebrickable.default_cache_dir()) if key else None
         nova_db = Path(req["nova_db"]) if req.get("nova_db") else None
         ldraw_dir = Path(req["ldraw_dir"]) if req.get("ldraw_dir") else None
@@ -255,11 +261,14 @@ class Runner:
                 log=run.note, on_event=on_event, on_round=on_round,
                 stop=lambda: run.stop_requested,
                 nova_db=nova_db, check_availability=bool(client), client=client,
+                owned=owned, owned_rebrickable_token=user_token if client else None,
                 ldraw_dir=ldraw_dir,
             )
+            last = next((r for r in reversed(outcome.rounds) if r.result), None)
             run.result = {
                 "clean": outcome.clean, "reason": outcome.stopped_because,
                 "final_model": outcome.final_model.name if outcome.final_model else None,
+                "owned": last.result.owned if last else None,
             }
             run.status = "stopped" if run.stop_requested else "done"
             models = produced()  # snapshots may have finished rendering since
@@ -432,6 +441,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/api/rebrickable/login":
+            body = self.read_json()
+            try:
+                client = rebrickable.Client(key=body.get("api_key") or "")
+                token = client.sign_in(body.get("username") or "", body.get("password") or "")
+            except rebrickable.RebrickableError as err:
+                return self.send_json({"error": str(err)}, 400)
+            return self.send_json({"user_token": token})
         if path == "/api/ldraw/download":
             return self.start_ldraw_download()
         if path == "/api/runs":

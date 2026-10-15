@@ -2,18 +2,19 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import availability, bom, checks, connectivity, feedback, ldraw, nova, rebrickable, steps
+from . import availability, bom, checks, connectivity, feedback, inventory, ldraw, nova, rebrickable, steps
 from .catalog import PartCatalog, load_colours
 
 
 def build_report(
     name, pieces, rows, findings, stepped, skipped, catalog_used,
-    availability_note=None, has_feedback=False, connectivity_note=None,
+    availability_note=None, has_feedback=False, owned_note=None, connectivity_note=None,
 ) -> str:
     errors = [f for f in findings if f.level == "error"]
     warnings = [f for f in findings if f.level == "warning"]
@@ -34,6 +35,8 @@ def build_report(
         ]
     if availability_note:
         lines += [availability_note, ""]
+    if owned_note:
+        lines += [owned_note, ""]
     if connectivity_note:
         lines += [connectivity_note, ""]
     for title, group in (("Errors", errors), ("Warnings", warnings)):
@@ -58,6 +61,8 @@ def build_report(
     ]
     if availability_note and "availability.csv" in availability_note:
         lines.append("- `availability.csv`: every part and colour with its status")
+    if owned_note:
+        lines.append("- `owned.csv`: each lot with how many you have and how many to buy")
     if has_feedback:
         lines.append(
             "- `feedback.md`: repair request to give to the agent that designed the model"
@@ -80,6 +85,7 @@ class Result:
     lot_count: int
     findings: list
     feedback: str | None  # the repair request text, or None when clean
+    owned: dict | None = None  # need/have/buy totals when an inventory was given
 
     @property
     def errors(self) -> int:
@@ -104,10 +110,16 @@ def run_pipeline(
     check_availability: bool = False,
     cache_dir: Path | None = None,
     client: rebrickable.Client | None = None,
+    owned: inventory.Inventory | None = None,
+    owned_rebrickable_token: str | None = None,
     ldraw_dir: Path | None = None,
     shadow_dir: Path | None = None,
 ) -> Result:
-    """Run every check on `model` and write the outputs. Raises PipelineError."""
+    """Run every check on `model` and write the outputs. Raises PipelineError.
+
+    `owned` is an inventory of bricks already in hand; `owned_rebrickable_token`
+    fetches one from the user's Rebrickable collection (needs the API client).
+    Either way the wanted list carries only what is left to buy."""
     model = Path(model)
     try:
         doc = ldraw.load(model)
@@ -175,8 +187,9 @@ def run_pipeline(
     out.mkdir(parents=True, exist_ok=True)
 
     overrides = None
+    aliases = None
     availability_note = None
-    if check_availability:
+    if check_availability or owned_rebrickable_token:
         try:
             client = client or rebrickable.Client(
                 cache_dir=cache_dir or rebrickable.default_cache_dir()
@@ -190,6 +203,7 @@ def run_pipeline(
         else:
             findings += availability.findings(results, pieces)
             overrides = availability.bricklink_overrides(results)
+            aliases = availability.aliases(results)
             (out / "availability.csv").write_text(
                 availability.to_csv(results), encoding="utf-8"
             )
@@ -199,7 +213,46 @@ def run_pipeline(
                 "and colour ids where Rebrickable supplied them."
             )
 
-    xml, skipped = bom.to_bricklink_xml(rows, colours, overrides)
+    owned_note = None
+    owned_summary = None
+    if owned_rebrickable_token and client:
+        try:
+            items = client.owned_parts(owned_rebrickable_token)
+            fetched = inventory.from_rebrickable_items(items)
+            if owned:
+                fetched.by_ldraw.update(owned.by_ldraw)
+                fetched.problems += owned.problems
+            owned = fetched
+        except rebrickable.RebrickableError as err:
+            findings.append(checks.Finding(
+                "warning", "owned", f"Could not read your Rebrickable collection: {err}"
+            ))
+    rows_to_buy = rows
+    if owned is not None:
+        leftover: dict = {}
+        covered = inventory.subtract(rows, owned, aliases, leftover=leftover)
+        rows_to_buy = inventory.remaining_rows(covered)
+        owned_summary = inventory.summary(covered, leftover)
+        (out / "owned.csv").write_text(inventory.to_csv(covered, colours, leftover), encoding="utf-8")
+        for problem in owned.problems[:10]:
+            findings.append(checks.Finding("warning", "owned", f"Inventory: {problem}"))
+        owned_note = (
+            f"You already have {owned_summary['have']} of the {owned_summary['need']} pieces "
+            f"({owned_summary['lots_covered']} of {owned_summary['lots_total']} lots complete); "
+            f"the wanted list holds the {owned_summary['buy']} still to buy. "
+            "Details are in `owned.csv`."
+        )
+        if owned_summary["unused"]:
+            owned_note += (
+                f" {owned_summary['unused']} of the bricks you listed "
+                f"({owned_summary['unused_lots']} line(s)) are not used in this model at all; "
+                "check the part number and colour. They are the rows with need 0 in `owned.csv`."
+            )
+        if owned.source == "rebrickable" and not aliases:
+            owned_note += (" Rebrickable parts could only be matched by id; run with "
+                           "--availability for colour-aware matching.")
+
+    xml, skipped = bom.to_bricklink_xml(rows_to_buy, colours, overrides)
     (out / "parts.csv").write_text(bom.to_csv(rows, colours, catalog), encoding="utf-8")
     (out / "bricklink_wanted.xml").write_text(xml, encoding="utf-8")
     (out / "flat.ldr").write_text(bom.to_flat_ldr(pieces, name), encoding="utf-8")
@@ -212,17 +265,34 @@ def run_pipeline(
         feedback_path.unlink()  # an earlier run's request no longer applies
     report = build_report(
         name, pieces, rows, findings, stepped, skipped, bool(catalog),
-        availability_note, bool(request), connectivity_note,
+        availability_note, bool(request), owned_note, connectivity_note,
     )
     (out / "report.md").write_text(report, encoding="utf-8")
 
     if catalog:
         catalog.close()
 
-    return Result(name, out, len(pieces), len(rows), findings, request)
+    return Result(name, out, len(pieces), len(rows), findings, request, owned_summary)
 
 
-def run_loop(args, client: rebrickable.Client | None) -> int:
+def rebrickable_login(client: rebrickable.Client | None) -> int:
+    import getpass
+
+    try:
+        client = client or rebrickable.Client(cache_dir=rebrickable.default_cache_dir())
+        username = input("Rebrickable username or email: ").strip()
+        password = getpass.getpass("Password (sent once to Rebrickable, not kept): ")
+        token = client.sign_in(username, password)
+    except (rebrickable.RebrickableError, EOFError, KeyboardInterrupt) as err:
+        print(f"brickpipe: {err}", file=sys.stderr)
+        return 2
+    print("Your Rebrickable user token (keep it private):")
+    print(token)
+    print("Use it with --owned-rebrickable TOKEN, or set REBRICKABLE_USER_TOKEN.")
+    return 0
+
+
+def run_loop(args, client: rebrickable.Client | None, owned=None, user_token=None) -> int:
     from . import loop
 
     out = args.out or args.model.with_name(f"{args.model.stem}-repair")
@@ -233,6 +303,7 @@ def run_loop(args, client: rebrickable.Client | None) -> int:
             nova_db=args.nova_db, max_step_parts=args.max_step_parts,
             keep_steps=args.keep_steps, check_availability=args.availability,
             cache_dir=args.cache_dir, client=client, ldraw_dir=args.ldraw_dir,
+            owned=owned, owned_rebrickable_token=user_token,
         )
     except (nova.NovaError, PipelineError) as err:
         print(f"brickpipe: {err}", file=sys.stderr)
@@ -288,6 +359,20 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
         "(default: ~/.cache/brickpipe/rebrickable)",
     )
     parser.add_argument(
+        "--owned", type=Path, default=None, metavar="CSV",
+        help="bricks you already have, as lines of part,colour,quantity (colour is "
+        "an LDraw code or name; blank for any). They are left out of the wanted list.",
+    )
+    parser.add_argument(
+        "--owned-rebrickable", metavar="USER_TOKEN", default=None,
+        help="also subtract your Rebrickable collection (user token from "
+        "'python -m brickpipe --rebrickable-login'; or the REBRICKABLE_USER_TOKEN variable)",
+    )
+    parser.add_argument(
+        "--rebrickable-login", action="store_true",
+        help="sign in to Rebrickable once and print a user token for --owned-rebrickable",
+    )
+    parser.add_argument(
         "--strict", action="store_true", help="exit with status 1 if any error is found"
     )
     loop_group = parser.add_argument_group(
@@ -322,22 +407,39 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
             return 2
         print(f"\nSaved {path}")
         return 0
+    if args.rebrickable_login:
+        return rebrickable_login(client)
     if args.model is None:
         parser.error("a model file is required (or --get-ldraw)")
 
+    owned = None
+    if args.owned:
+        try:
+            owned = inventory.from_text(args.owned.read_text(encoding="utf-8"), load_colours())
+        except OSError as err:
+            print(f"brickpipe: {err}", file=sys.stderr)
+            return 2
+    user_token = args.owned_rebrickable or os.environ.get("REBRICKABLE_USER_TOKEN") or None
+    if user_token and not args.availability:
+        args.availability = True  # the collection is matched through Rebrickable's ids
+
     if args.nova_chat:
-        return run_loop(args, client)
+        return run_loop(args, client, owned, user_token)
 
     try:
         result = run_pipeline(
             args.model, args.out, nova_db=args.nova_db, max_step_parts=args.max_step_parts,
             keep_steps=args.keep_steps, check_availability=args.availability,
             cache_dir=args.cache_dir, client=client, ldraw_dir=args.ldraw_dir,
+            owned=owned, owned_rebrickable_token=user_token,
         )
     except PipelineError as err:
         print(f"brickpipe: {err}", file=sys.stderr)
         return 2
     print(result.summary())
+    if result.owned:
+        o = result.owned
+        print(f"You have {o['have']} of {o['need']} pieces; {o['buy']} to buy.")
     print(f"Wrote {result.out}/")
     if result.feedback:
         print("feedback.md lists what the designing agent should repair.")

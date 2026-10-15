@@ -13,6 +13,7 @@ to actually build it:
 | `report.md` | Piece counts and every problem found |
 | `availability.csv` | With `--availability`: whether each part was ever made in that colour |
 | `feedback.md` | When there is something to fix: a repair request for the agent that designed the model |
+| `owned.csv` | With an inventory: each lot with how many you have and how many to buy |
 
 With Nova's database and the LDraw part library present, the report also says
 whether every piece is clipped to the model (see below).
@@ -107,6 +108,26 @@ flagged. Overlapping geometry (a tyre on a rim) counts as a press fit.
 
 This is still not a proof that the model stands up; it is a proof that it can
 be assembled.
+
+### Leave out the bricks you already have
+
+```
+python -m brickpipe model.mpd -o out/ --owned mine.csv
+python -m brickpipe model.mpd -o out/ --availability --owned-rebrickable YOUR_USER_TOKEN
+```
+
+`mine.csv` is lines of `part,colour,quantity`: the part as an LDraw or
+BrickLink id, the colour as an LDraw code or name, or blank for "any colour".
+`--owned-rebrickable` adds everything in your Rebrickable sets and part lists;
+get the token once with `python -m brickpipe --rebrickable-login` (your
+password goes to Rebrickable once and is not kept), or set
+`REBRICKABLE_USER_TOKEN`. The page has the same two inputs under "Bricks you
+already have".
+
+The wanted list then holds only what is left to buy. `owned.csv` lists every
+lot with need, have and buy, and the report says how much is covered.
+Matching a Rebrickable collection needs the availability check, since that
+is where Rebrickable's part and colour ids come from.
 
 ### Send the problems back to the agent
 
@@ -224,6 +245,11 @@ affordable today.
 
 1. Price estimate per model (needs a BrickLink API key).
 2. Clip, hinge and bar connections in the connectivity check.
+
+1. Stud-level connectivity for ordinary bricks and plates.
+2. Price estimate per model.
+3. Recognise bricks you already have from a photo, confirmed by you before
+   they are subtracted.
 
 ## Notes for Nova
 

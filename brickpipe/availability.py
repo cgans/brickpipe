@@ -37,6 +37,7 @@ class Availability:
     rebrickable_part: str = ""
     bricklink_part: str = ""
     bricklink_colour: int | None = None
+    rebrickable_colour: int | None = None
     colour_name: str = ""
     sets: int = 0
     alternatives: list[str] = field(default_factory=list)  # colour names
@@ -126,6 +127,7 @@ def check(
         item = Availability(row, OK)
         if colour:
             item.colour_name = colour.get("name", "")
+            item.rebrickable_colour = colour.get("id")
             bl = ext_ids(colour, "BrickLink")
             item.bricklink_colour = int(bl[0]) if bl else None
         if record:
@@ -205,6 +207,15 @@ def findings(
             used,
         ))
     return out
+
+
+def aliases(results: list[Availability]) -> dict[tuple[str, int], tuple[str | None, int | None, str | None]]:
+    """(LDraw part, LDraw colour) -> (Rebrickable part, Rebrickable colour, BrickLink part)."""
+    return {
+        (a.row.part, a.row.colour): (a.rebrickable_part or None, a.rebrickable_colour,
+                                     a.bricklink_part or None)
+        for a in results
+    }
 
 
 def bricklink_overrides(results: list[Availability]) -> dict[tuple[str, int], tuple[str, int]]:
