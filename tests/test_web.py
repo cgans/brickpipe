@@ -92,6 +92,33 @@ class WebTests(unittest.TestCase):
         self.assertTrue(first["text"].startswith("a shed"))
         self.assertIn("checked for parts that cannot be bought", first["text"])
 
+    def test_bricklink_secrets_stay_out_of_state_and_api(self):
+        from brickpipe import bricklink
+        from test_prices import FakeBrickLink, guide
+        fake = FakeBrickLink({})
+        original = bricklink.Client.__init__
+
+        def patched(self, creds=None, cache_dir=None, fetch=None, sleep=None):
+            assert creds.token_secret == "ts-secret"
+            original(self, fetch=fake, sleep=lambda s: None)
+        bricklink.Client.__init__ = patched
+        try:
+            status, run = http("POST", f"{self.base}/api/runs", {
+                "chat_id": "latest", "rounds": 0, "price_region": "eu",
+                "bricklink": {"consumer_key": "ck", "consumer_secret": "cs-secret",
+                              "token": "tk", "token_secret": "ts-secret"}})
+            run = self.wait_done(run["id"])
+        finally:
+            bricklink.Client.__init__ = original
+        self.assertTrue(run["request"]["prices"])
+        self.assertNotIn("bricklink", run["request"])
+        self.assertIn("price", run["result"])
+        self.assertEqual(run["result"]["price"]["region"], "eu")
+        state = (Path(self.tmp.name) / "runs" / run["id"] / "state.json").read_text()
+        self.assertNotIn("secret", state)
+        self.assertTrue(fake.calls)  # the run really asked for prices
+        self.assertIn("prices.csv", run["files"])
+
     def test_history_lists_runs_newest_first(self):
         for _ in range(2):
             status, run = http("POST", f"{self.base}/api/runs", {"chat_id": "latest", "rounds": 0})

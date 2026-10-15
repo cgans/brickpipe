@@ -350,6 +350,48 @@ ul.history button:hover b { text-decoration: underline; }
         </div>
       </div>
     </div>
+
+    <div class="panel stack">
+      <h2>Prices (BrickLink)</h2>
+      <p class="small muted">With these, each run ends with what the wanted list would cost, and lots nobody sells or that are pricey go back to the agent as things to swap. Register at <a href="https://www.bricklink.com/v2/api/register_consumer.page" target="_blank" rel="noopener">bricklink.com/v2/api/register_consumer.page</a>: the consumer key and secret identify brickpipe, and the access token is issued for your computer's current public IP address.</p>
+      <div class="row">
+        <div class="grow"><label for="blConsumerKey">Consumer key</label><input id="blConsumerKey" type="text" autocomplete="off"></div>
+        <div class="grow"><label for="blConsumerSecret">Consumer secret</label><input id="blConsumerSecret" type="password" autocomplete="off"></div>
+      </div>
+      <div class="row">
+        <div class="grow"><label for="blToken">Token value</label><input id="blToken" type="text" autocomplete="off"></div>
+        <div class="grow"><label for="blTokenSecret">Token secret</label><input id="blTokenSecret" type="password" autocomplete="off"></div>
+      </div>
+      <p class="small muted">If your home IP address changes, BrickLink rejects the token; add one for the new address on the same page and paste it here.</p>
+      <div class="row">
+        <div class="grow">
+          <label for="priceRegion">Sellers in</label>
+          <select id="priceRegion">
+            <option value="">Anywhere</option>
+            <option value="north_america">North America</option>
+            <option value="europe">Europe</option>
+            <option value="eu">EU</option>
+            <option value="asia">Asia</option>
+            <option value="oceania">Oceania</option>
+            <option value="south_america">South America</option>
+          </select>
+        </div>
+        <div class="grow">
+          <label for="priceCurrency">Currency</label>
+          <input id="priceCurrency" type="text" placeholder="USD" maxlength="3" style="text-transform:uppercase">
+        </div>
+      </div>
+      <div class="row">
+        <div class="grow">
+          <label for="priceCondition">Condition</label>
+          <select id="priceCondition"><option value="N">New</option><option value="U">Used</option></select>
+        </div>
+        <div class="grow">
+          <label for="priceGuide">Based on</label>
+          <select id="priceGuide"><option value="stock">What is for sale now</option><option value="sold">Sales in the last six months</option></select>
+        </div>
+      </div>
+    </div>
   </div>
 </section>
 <div class="toast" id="toast" role="status"></div>
@@ -399,6 +441,7 @@ ul.history button:hover b { text-decoration: underline; }
     const missing = [];
     if (!$('rebrickableKey').value.trim()) missing.push('no Rebrickable key, so colours are not checked against real parts');
     if (!$('ldrawDir').value.trim()) missing.push('no LDraw library, so stud connections are not checked');
+    if (!blComplete()) missing.push(Object.values(blCreds()).some(Boolean) ? 'BrickLink needs all four values, so no price estimate' : 'no BrickLink keys, so no price estimate');
     $('settingsHint').hidden = !missing.length;
     $('settingsHint').innerHTML = missing.length ? esc(missing.join('; ')) + '. <button type="button" id="hintSettings">Open Settings</button>' : '';
     const b = $('hintSettings'); if (b) b.onclick = () => showView('settings');
@@ -415,10 +458,16 @@ ul.history button:hover b { text-decoration: underline; }
     $('rounds').value = store.get('rounds', '') || s.rounds;
     $('rebrickableKey').value = store.get('rebrickable_key', '');
     $('ownedText').value = store.get('owned_text', '');
+    for (const [id, key] of priceFields) { const v = store.get(key, ''); if (v) $(id).value = v; }
     rbRender();
     settingsHint();
   }
-  for (const [id, key] of [['novaUrl', 'nova_url'], ['novaDb', 'nova_db'], ['ldrawDir', 'ldraw_dir'], ['rounds', 'rounds'], ['rebrickableKey', 'rebrickable_key'], ['ownedText', 'owned_text']]) {
+  const priceFields = [['blConsumerKey', 'bl_consumer_key'], ['blConsumerSecret', 'bl_consumer_secret'], ['blToken', 'bl_token'], ['blTokenSecret', 'bl_token_secret'],
+    ['priceRegion', 'price_region'], ['priceCurrency', 'price_currency'], ['priceCondition', 'price_condition'], ['priceGuide', 'price_guide']];
+  const blCreds = () => ({ consumer_key: $('blConsumerKey').value.trim(), consumer_secret: $('blConsumerSecret').value.trim(),
+    token: $('blToken').value.trim(), token_secret: $('blTokenSecret').value.trim() });
+  const blComplete = () => Object.values(blCreds()).every(Boolean);
+  for (const [id, key] of [['novaUrl', 'nova_url'], ['novaDb', 'nova_db'], ['ldrawDir', 'ldraw_dir'], ['rounds', 'rounds'], ['rebrickableKey', 'rebrickable_key'], ['ownedText', 'owned_text'], ...priceFields]) {
     $(id).addEventListener('change', () => { store.set(key, $(id).value.trim()); settingsHint(); });
   }
 
@@ -521,6 +570,8 @@ ul.history button:hover b { text-decoration: underline; }
       nova_url: $('novaUrl').value.trim(), nova_db: $('novaDb').value.trim(), ldraw_dir: $('ldrawDir').value.trim(),
       rounds: Number($('rounds').value) || 3, rebrickable_key: $('rebrickableKey').value.trim(),
       owned_text: $('ownedText').value.trim(), rebrickable_user_token: store.get('rebrickable_user_token', ''),
+      bricklink: blComplete() ? blCreds() : null, price_region: $('priceRegion').value, price_currency: $('priceCurrency').value.trim().toUpperCase(),
+      price_condition: $('priceCondition').value, price_guide: $('priceGuide').value,
     };
     if ($('existing').open) {
       body.model_file = $('modelFile').value; body.chat_id = $('chatId').value || 'latest';
@@ -622,8 +673,8 @@ ul.history button:hover b { text-decoration: underline; }
       o.className = 'outcome ' + (run.status === 'failed' ? 'failed' : clean ? 'clean' : 'stopped');
       o.innerHTML = run.status === 'failed'
         ? `<b>The run failed.</b> ${esc(run.error || '')}`
-        : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.` + ownedLine(run) + viewerBox(run)
-        : `<b>Stopped before the model was clean.</b> ${esc(run.result ? run.result.reason : '')} The files below are for the last model checked.`;
+        : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.` + ownedLine(run) + priceLine(run) + viewerBox(run)
+        : `<b>Stopped before the model was clean.</b> ${esc(run.result ? run.result.reason : '')} The files below are for the last model checked.` + ownedLine(run) + priceLine(run);
     } else { o.hidden = true; }
     wireViewer(run);
 
@@ -674,6 +725,15 @@ ul.history button:hover b { text-decoration: underline; }
       <iframe class="viewer-frame" src="${esc(src)}" title="Nova's 3D viewer" loading="lazy" allow="xr-spatial-tracking; fullscreen"></iframe>
     </div>`;
   }
+  function priceLine(run) {
+    const p = run.result && run.result.price;
+    if (!p) return '';
+    if (p.error && !Number(p.total)) return `<p style="margin-top:8px" class="err">Price estimate did not finish: ${esc(p.error)}</p>`;
+    const money = v => Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const where = p.region ? ` from sellers in ${p.region.replace(/_/g, ' ')}` : '';
+    const basis = p.guide_type === 'sold' ? 'recent sales' : 'current listings';
+    return `<p style="margin-top:8px">Estimated cost: <b>about ${money(p.total)} ${esc(p.currency)}</b> for the ${p.pieces} pieces to buy (${p.new_or_used === 'U' ? 'used' : 'new'}, ${basis}${where}), or ${money(p.total_low)} at every seller's lowest price, before shipping.${p.unpriced ? ` <span class="muted">${p.unpriced} lot${p.unpriced === 1 ? '' : 's'} had no price; see prices.csv.</span>` : ''}${p.error ? ` <span class="err">The estimate stopped early: ${esc(p.error)}</span>` : ''}</p>`;
+  }
   function ownedLine(run) {
     const o = run.result && run.result.owned;
     if (!o) return '';
@@ -713,6 +773,7 @@ ul.history button:hover b { text-decoration: underline; }
     'flat.ldr': 'All pieces in one file, for Rebrickable',
     'availability.csv': 'Each part and colour, was it ever made',
     'owned.csv': 'Each lot: need, have, buy',
+    'prices.csv': 'BrickLink prices for each lot to buy',
     'report.md': 'Problems found',
     'feedback.md': 'Repair request for the agent',
   };

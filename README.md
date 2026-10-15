@@ -129,6 +129,32 @@ lot with need, have and buy, and the report says how much is covered.
 Matching a Rebrickable collection needs the availability check, since that
 is where Rebrickable's part and colour ids come from.
 
+### Estimate what it will cost
+
+```
+python -m brickpipe model.mpd -o out/ --availability --prices --price-region north_america --price-currency USD
+```
+
+`--prices` asks BrickLink's price guide what each lot still to buy costs and
+writes `prices.csv` (average and lowest price each, line total, how many
+sellers list it). The report and the page give the total: about X at
+average prices, or Y at every seller's lowest, before shipping. Lots nobody
+is selling, lots from three sellers or fewer, and pieces costing 1.50 or
+more each go into the repair request as things the agent should swap for
+commoner parts.
+
+It needs the four BrickLink API values as environment variables
+(`BRICKLINK_CONSUMER_KEY`, `BRICKLINK_CONSUMER_SECRET`, `BRICKLINK_TOKEN`,
+`BRICKLINK_TOKEN_SECRET`), from
+[bricklink.com/v2/api/register_consumer.page](https://www.bricklink.com/v2/api/register_consumer.page):
+register a consumer, then add an access token for your computer's public IP
+address. The token only works from that address, so a changed home IP means
+adding a new token on that page. On the page they go under Settings, Prices
+(BrickLink), and stay in the browser. `--price-used` prices used parts and
+`--price-sold` uses the last six months of sales instead of current listings.
+Prices are cached for a day. Best with `--availability`, which supplies
+BrickLink's own part and colour ids.
+
 ### Send the problems back to the agent
 
 When a run finds problems the designing agent can fix, it writes `feedback.md`.
@@ -224,9 +250,11 @@ which adds a setup check and the Windows-specific commands.
 - **Connectivity** (needs `--nova-db` and the LDraw library): pieces that no
   stud, pin or axle joins to the model.
 
-Not covered: whether the model stands up under gravity, connections made by
-clips, hinges and bars, and whether a part that exists is in stock or
-affordable today.
+- **Prices** (needs the BrickLink API values): what the lots still to buy
+  cost today, and which ones nobody sells, few sell, or are pricey per piece.
+
+Not covered: whether the model stands up under gravity, and connections made
+by clips, hinges and bars.
 
 ## Known limits
 
@@ -243,12 +271,8 @@ affordable today.
 
 ## Next steps
 
-1. Price estimate per model (needs a BrickLink API key).
-2. Clip, hinge and bar connections in the connectivity check.
-
-1. Stud-level connectivity for ordinary bricks and plates.
-2. Price estimate per model.
-3. Recognise bricks you already have from a photo, confirmed by you before
+1. Clip, hinge and bar connections in the connectivity check.
+2. Recognise bricks you already have from a photo, confirmed by you before
    they are subtracted.
 
 ## Notes for Nova
