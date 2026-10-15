@@ -130,8 +130,12 @@ getting shorter.
   SmartScreen objects: More info > Run anyway. Then File > Open
   `out\instructions.mpd` and page through the steps. Export a PDF from its
   File menu.
-- **Shopping list:** on BrickLink, go to Want > Upload and upload
-  `out\bricklink_wanted.xml`. Note any item it rejects.
+- **Shopping list:** on BrickLink, open
+  <https://www.bricklink.com/v3/wanted/upload.page> (logged in) and choose
+  "Upload BrickLink XML format". That option takes pasted text, not a file:
+  open `out\bricklink_wanted.xml` in Notepad, select all, copy, and paste it
+  into the box. Note any item it rejects. The "Buy All" view on the new
+  wanted list gives a price estimate.
 - **Second opinion:** upload `out\flat.ldr` to Rebrickable as a custom parts
   list to see its own part matching and price estimate.
 
