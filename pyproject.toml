@@ -12,9 +12,10 @@ dependencies = []
 
 [project.scripts]
 brickpipe = "brickpipe.cli:main"
+brickpipe-ui = "brickpipe.web:main"
 
 [tool.setuptools.packages.find]
 include = ["brickpipe*"]
 
 [tool.setuptools.package-data]
-brickpipe = ["data/*.csv"]
+brickpipe = ["data/*.csv", "web/*.html"]

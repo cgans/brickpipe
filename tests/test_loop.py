@@ -55,6 +55,14 @@ class FakeNova:
         body = json.loads(req.data) if req.data else None
         if path == "/api/chats" and method == "GET":
             return self.json({"chats": list(self.chats.values())})
+        if path == "/api/chats" and method == "POST":
+            cid = f"new-{len(self.chats)}"
+            self.chats[cid] = {"id": cid, "title": "New chat", "updated_at": 9.0, "created_at": 9.0}
+            self.models[cid] = []
+            return self.json(self.chats[cid])
+        if path == "/api/models":
+            return self.json({"models": [dict(m, gallery=False) for ms in self.models.values() for m in ms],
+                              "pending": 0})
         if path.startswith("/api/chats/") and path.endswith("/messages"):
             chat_id = path.split("/")[3]
             self.messages.append(body)
@@ -90,7 +98,8 @@ class FakeNova:
         if self.fail_turn:
             events.append(("turn_error", {"message": "provider rate limit"}))
         elif self.deliver:
-            text = FIXED if self.repairs else BROKEN
+            last = self.messages[-1] if self.messages else {}
+            text = FIXED if (self.repairs and last.get("documents")) else BROKEN
             n = len(self.models[chat_id]) + 1
             self.files[f"/files/generated/v{n}.mpd"] = text
             self.models[chat_id].append({

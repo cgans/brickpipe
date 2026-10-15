@@ -124,6 +124,13 @@ class Client:
     def create_chat(self, llm_model_id: str | None = None) -> dict:
         return self._request("POST", "/api/chats", {"llm_model_id": llm_model_id})
 
+    def generated_models(self) -> list[dict]:
+        """Every model in Nova's collection, newest first (name, file, parts, image_url)."""
+        return self._request("GET", "/api/models").get("models", [])
+
+    def chat_url(self, chat_id: str) -> str:
+        return f"{self.base_url}/chat/{chat_id}"
+
     def is_running(self, chat_id: str) -> bool:
         return bool(self._request("GET", f"/api/chats/{chat_id}")["chat"].get("running"))
 
@@ -195,6 +202,7 @@ class Client:
         self, chat_id: str, approve_tools: bool = True,
         on_event: Callable[[str, dict], None] | None = None,
         timeout: float = TURN_TIMEOUT,
+        stop: Callable[[], bool] = lambda: False,
     ) -> Turn:
         """Follow the event stream until the agent's turn ends.
 
@@ -209,6 +217,9 @@ class Client:
             for event, data in self.events(chat_id):
                 if on_event:
                     on_event(event, data)
+                if stop():
+                    turn.error = "stopped by the user"
+                    return turn
                 if event == "snapshot":
                     if not data.get("running"):
                         turn.finished = True

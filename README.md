@@ -16,6 +16,29 @@ to actually build it:
 
 Python 3.10 or newer. No third-party packages.
 
+## The page
+
+With LDraw Nova running, start brickpipe's own page and everything below
+happens from the browser:
+
+```
+python -m brickpipe.web
+```
+
+It opens <http://localhost:8766>. Describe a model (or pick one Nova already
+made), press Design and check, and watch each round: Nova designs, brickpipe
+checks, the two go back and forth until every piece can be bought. The page
+ends with the files for the final model and a button that copies the wanted
+list for BrickLink. On Windows, `brickpipe-ui.cmd` does the same with a
+double-click.
+
+Runs are kept under `runs/` and listed on the page, so you can close it and
+come back. The Rebrickable key is stored in your browser and sent with each
+run; the server keeps it in memory for that run only. The page listens on
+localhost only.
+
+The command line below does the same things one step at a time.
+
 ## Run it
 
 ```
@@ -167,10 +190,8 @@ stands up, and whether a part that exists is in stock or affordable today.
 
 ## Next steps
 
-1. Start the loop from a prompt, so a model goes from idea to clean in one
-   command.
-2. Stud-level connectivity for ordinary bricks and plates.
-3. Price estimate per model.
+1. Stud-level connectivity for ordinary bricks and plates.
+2. Price estimate per model.
 
 ## Licence note
 

@@ -51,8 +51,13 @@ def run(
     approve_tools: bool = True,
     pipeline: Callable[..., Result] = run_pipeline,
     log: Callable[[str], None] = print,
+    on_event: Callable[[str, dict], None] | None = None,
+    on_round: Callable[[Round], None] | None = None,
+    stop: Callable[[], bool] = lambda: False,
     **pipeline_options,
 ) -> LoopResult:
+    """Run the loop. `on_event` sees Nova's raw agent events, `on_round` is
+    called whenever a round changes, and `stop` is polled between steps."""
     chat = agent.find_chat(chat_id)
     chat_id = chat["id"]
     log(f"Using Nova chat {chat_id} ({chat.get('title') or 'untitled'})")
@@ -72,6 +77,8 @@ def run(
             outcome.stopped_because = f"round {number}: {err}"
             break
         log(f"Round {number}: {rnd.result.summary()}")
+        if on_round:
+            on_round(rnd)
 
         if not rnd.result.feedback:
             outcome.clean = True
@@ -82,6 +89,10 @@ def run(
             outcome.final_model = current
             outcome.stopped_because = f"reached the limit of {max_rounds} repair round(s)"
             break
+        if stop():
+            outcome.final_model = current
+            outcome.stopped_because = "stopped by the user"
+            break
 
         known = {m.id for m in agent.models(chat_id)}
         sent_at = time.time()
@@ -91,7 +102,13 @@ def run(
         )
         rnd.sent = True
         log(f"Round {number}: sent feedback.md to the agent, waiting...")
-        rnd.turn = agent.wait_for_turn(chat_id, approve_tools=approve_tools)
+        if on_round:
+            on_round(rnd)
+        rnd.turn = agent.wait_for_turn(
+            chat_id, approve_tools=approve_tools, on_event=on_event, stop=stop,
+        )
+        if on_round:
+            on_round(rnd)
         if rnd.turn.error:
             outcome.final_model = current
             outcome.stopped_because = f"the agent's turn failed: {rnd.turn.error}"

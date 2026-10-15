@@ -87,7 +87,22 @@ cd ..\brickpipe
 powershell -ExecutionPolicy Bypass -File scripts\check-setup.ps1
 ```
 
-## 5. Generate a small model
+## 5. The page (the easy way)
+
+With Nova running, double-click `brickpipe-ui.cmd` in the `brickpipe` folder,
+or run:
+
+```powershell
+py -3 -m brickpipe.web
+```
+
+Your browser opens <http://localhost:8766>. Open Settings on the page, paste
+your Rebrickable key (it stays in the browser), check that the Nova database
+path points at `..\ldraw-nova\data\ldraw-info.db`, then describe a model and
+press Design and check. Steps 6 and 7 below are what the page does for you;
+skip to step 8 when it finishes.
+
+## 5b. Generate a small model (by hand)
 
 In the Nova app, start a chat and ask for something simple, for example:
 

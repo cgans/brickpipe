@@ -1,0 +1,483 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>brickpipe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #E6E8EC;
+  --panel: #FFFFFF;
+  --panel-2: #F3F4F6;
+  --ink: #1E2430;
+  --ink-2: #5B6472;
+  --line: #CFD3DA;
+  --stud: #F0C419;
+  --stud-edge: #C9A10F;
+  --bad: #C8402F;
+  --warn: #E08A1E;
+  --good: #2F8F5B;
+  --focus: #2457C5;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1B1E24; --panel: #262A32; --panel-2: #2F343D; --ink: #ECEEF2; --ink-2: #A3ABB8;
+    --line: #3C424D; --stud: #F0C419; --stud-edge: #B8930C; --bad: #E2614F; --warn: #F0A33A;
+    --good: #4FB37C; --focus: #7FA6F2;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1B1E24; --panel: #262A32; --panel-2: #2F343D; --ink: #ECEEF2; --ink-2: #A3ABB8;
+  --line: #3C424D; --stud: #F0C419; --stud-edge: #B8930C; --bad: #E2614F; --warn: #F0A33A;
+  --good: #4FB37C; --focus: #7FA6F2;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { font-size: 17px; }
+body {
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-family: "Atkinson Hyperlegible", "Segoe UI", system-ui, sans-serif;
+  line-height: 1.45; font-variant-numeric: tabular-nums;
+}
+a { color: inherit; }
+button, input, select, textarea { font: inherit; color: inherit; }
+h1, h2, h3 { margin: 0; font-weight: 700; line-height: 1.15; }
+h1 { font-size: 1.6rem; }
+h2 { font-size: 1.15rem; }
+p { margin: 0; }
+.muted { color: var(--ink-2); }
+.small { font-size: .9rem; }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+header {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+  padding: 18px 16px 10px; max-width: 1180px; margin: 0 auto;
+}
+header p { max-width: 60ch; }
+main {
+  display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr); gap: 20px;
+  padding: 0 16px 40px; max-width: 1180px; margin: 0 auto;
+}
+@media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+
+.panel {
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 18px;
+}
+.panel + .panel { margin-top: 16px; }
+.stack > * + * { margin-top: 14px; }
+
+label { display: block; font-weight: 700; margin-bottom: 6px; }
+textarea, input[type=text], input[type=password], input[type=number], select {
+  width: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--panel-2); color: var(--ink);
+}
+textarea { min-height: 120px; resize: vertical; }
+details > summary { cursor: pointer; font-weight: 700; margin-bottom: 10px; }
+.row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.grow { flex: 1 1 160px; }
+
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 8px;
+  border: 1px solid var(--line); background: var(--panel-2); cursor: pointer; font-weight: 700;
+}
+.btn.primary { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+.btn.primary:disabled { opacity: .5; cursor: default; }
+.btn.quiet { font-weight: 400; }
+.btn.danger { color: var(--bad); }
+
+/* the build sheet */
+.sheet-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.sheet-head h2 { overflow-wrap: anywhere; }
+.statusline { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.statusline .status { margin: 0; }
+.statusline .phase { margin: 0; flex: 1 1 200px; }
+.status { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; }
+.status .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-2); }
+.status.live .dot { background: var(--stud); animation: pulse 1.2s ease-in-out infinite; }
+.status.done .dot { background: var(--good); }
+.status.failed .dot { background: var(--bad); }
+@keyframes pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .status.live .dot { animation: none; } }
+
+.phase { margin-top: 6px; min-height: 1.4em; }
+
+table.rounds { width: 100%; border-collapse: collapse; margin-top: 14px; }
+table.rounds th { text-align: left; font-weight: 400; color: var(--ink-2); padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
+table.rounds td { padding: 10px 8px 10px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+table.rounds td.num { text-align: right; }
+table.rounds th.num { text-align: right; }
+
+/* studs: one per problem, filled yellow when the round is clean */
+.studs { display: flex; gap: 4px; flex-wrap: wrap; max-width: 220px; }
+.stud {
+  width: 14px; height: 14px; border-radius: 50%;
+  background: var(--panel-2); border: 1px solid var(--line);
+}
+.stud.bad { background: var(--bad); border-color: var(--bad); }
+.stud.warn { background: var(--warn); border-color: var(--warn); }
+.stud.clean { background: var(--stud); border-color: var(--stud-edge); }
+.stud.pending { background: transparent; border-style: dashed; }
+
+.outcome { padding: 14px 16px; border-radius: 8px; background: var(--panel-2); margin-top: 16px; }
+.outcome.clean { border-left: 6px solid var(--stud); }
+.outcome.failed { border-left: 6px solid var(--bad); }
+.outcome.stopped { border-left: 6px solid var(--warn); }
+
+.files { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin-top: 12px; }
+.file { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); }
+.file b { display: block; }
+.file .row { margin-top: 6px; }
+
+pre.doc {
+  background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px; white-space: pre-wrap; max-height: 360px; overflow: auto; font-size: .9rem;
+  font-family: inherit;
+}
+.log { font-size: .85rem; color: var(--ink-2); max-height: 200px; overflow: auto; white-space: pre-wrap; }
+
+ul.history { list-style: none; padding: 0; margin: 0; }
+ul.history li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+ul.history li:last-child { border-bottom: 0; }
+ul.history button { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; width: 100%; }
+ul.history button:hover b { text-decoration: underline; }
+
+.empty { padding: 30px 10px; text-align: center; }
+.brick { display: grid; grid-template-columns: repeat(4, 18px); gap: 8px; justify-content: center; padding: 14px; margin: 0 auto 16px; width: max-content; background: var(--stud); border-radius: 6px; box-shadow: inset 0 -5px 0 var(--stud-edge); }
+.brick .stud { width: 18px; height: 18px; box-shadow: inset 0 -3px 0 var(--stud-edge); }
+.toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--panel); padding: 10px 16px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.toast.show { opacity: 1; }
+.err { color: var(--bad); }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>brickpipe</h1>
+    <p class="muted">Describe a model. Nova designs it, brickpipe checks that every piece can be bought, and the two go back and forth until it can. You get the shopping list and the instructions.</p>
+  </div>
+  <button class="btn quiet" id="themeBtn" type="button" title="Switch light and dark">Theme</button>
+</header>
+
+<main>
+  <section>
+    <form class="panel stack" id="briefForm">
+      <div>
+        <label for="prompt">What should Nova build?</label>
+        <textarea id="prompt" placeholder="A small garden shed, about 150 pieces, in ordinary bricks and plates with a red door."></textarea>
+      </div>
+
+      <details id="existing">
+        <summary>Or start from a model you already have</summary>
+        <div class="stack">
+          <div>
+            <label for="modelFile">Model in Nova's collection</label>
+            <select id="modelFile"><option value="">Loading…</option></select>
+          </div>
+          <div>
+            <label for="chatId">The chat that designed it</label>
+            <select id="chatId"><option value="latest">Most recent chat</option></select>
+            <p class="small muted">Repairs are sent to this chat, so the agent keeps its memory of the design.</p>
+          </div>
+        </div>
+      </details>
+
+      <details id="settings">
+        <summary>Settings</summary>
+        <div class="stack">
+          <div>
+            <label for="rebrickableKey">Rebrickable API key</label>
+            <input id="rebrickableKey" type="password" autocomplete="off" placeholder="Needed to check that parts exist in each colour">
+            <p class="small muted">Kept in this browser only. Free from rebrickable.com under Account, Settings, API.</p>
+          </div>
+          <div>
+            <label for="novaUrl">Nova web app</label>
+            <input id="novaUrl" type="text">
+          </div>
+          <div>
+            <label for="novaDb">Nova database (ldraw-info.db)</label>
+            <input id="novaDb" type="text" placeholder="C:\…\ldraw-nova\data\ldraw-info.db">
+          </div>
+          <div>
+            <label for="rounds">Most repair rounds</label>
+            <input id="rounds" type="number" min="0" max="10" value="3" style="width:6em">
+          </div>
+        </div>
+      </details>
+
+      <div class="row">
+        <button class="btn primary" id="runBtn" type="submit">Design and check</button>
+        <span class="small muted" id="novaState"></span>
+      </div>
+      <p class="err small" id="formError"></p>
+    </form>
+
+    <div class="panel">
+      <h2>Earlier runs</h2>
+      <ul class="history" id="history"><li class="muted small">None yet.</li></ul>
+    </div>
+  </section>
+
+  <section id="sheet">
+    <div class="panel empty" id="emptySheet">
+      <div class="brick" aria-hidden="true">
+        <span class="stud clean"></span><span class="stud clean"></span><span class="stud clean"></span><span class="stud clean"></span>
+        <span class="stud clean"></span><span class="stud clean"></span><span class="stud clean"></span><span class="stud clean"></span>
+      </div>
+      <h2>No run yet</h2>
+      <p class="muted">Describe a model and press Design and check. Each round shows up here as it happens.</p>
+      <p class="muted small" style="margin-top:8px">Nova takes a few minutes to design, and a minute or two per repair. You can close this page and come back; runs keep going.</p>
+    </div>
+
+    <div class="panel" id="runSheet" hidden>
+      <div class="sheet-head">
+        <div>
+          <h2 id="runTitle"></h2>
+          <p class="small muted" id="runMeta"></p>
+        </div>
+        <div class="row">
+          <a class="btn quiet" id="chatLink" href="#" target="_blank" rel="noreferrer" hidden>Open the Nova chat</a>
+          <button class="btn quiet danger" id="stopBtn" type="button" hidden>Stop after this step</button>
+        </div>
+      </div>
+      <div class="statusline">
+        <p class="status" id="runStatus"><span class="dot"></span><span id="statusText"></span></p>
+        <p class="phase muted" id="phaseText"></p>
+      </div>
+
+      <table class="rounds" id="roundsTable" hidden>
+        <thead><tr>
+          <th>Round</th><th>Model</th><th class="num">Pieces</th><th class="num">Problems</th><th>Checks</th><th>Agent</th>
+        </tr></thead>
+        <tbody id="roundsBody"></tbody>
+      </table>
+
+      <div id="outcome" hidden></div>
+
+      <div id="results" hidden>
+        <h3 style="margin-top:18px">Files for the final model</h3>
+        <div class="files" id="files"></div>
+        <details style="margin-top:14px"><summary>Report</summary><pre class="doc" id="reportText"></pre></details>
+        <details id="feedbackWrap"><summary>What the agent was last asked to fix</summary><pre class="doc" id="feedbackText"></pre></details>
+      </div>
+
+      <details style="margin-top:14px"><summary>Log</summary><div class="log" id="logText"></div></details>
+    </div>
+  </section>
+</main>
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  const api = (path, opts) => fetch(path, opts).then(async r => {
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    return data;
+  });
+  const store = {
+    get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+  };
+  let toastTimer;
+  const toast = text => { $('toast').textContent = text; $('toast').classList.add('show'); clearTimeout(toastTimer); toastTimer = setTimeout(() => $('toast').classList.remove('show'), 2200); };
+
+  // theme
+  const applyTheme = t => { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; };
+  applyTheme(store.get('theme', ''));
+  $('themeBtn').onclick = () => {
+    const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+    const cur = document.documentElement.dataset.theme || (dark ? 'dark' : 'light');
+    const next = cur === 'dark' ? 'light' : 'dark';
+    applyTheme(next); store.set('theme', next);
+  };
+
+  // settings
+  async function loadSettings() {
+    const s = await api('/api/settings');
+    $('novaUrl').value = store.get('nova_url', '') || s.nova_url;
+    $('novaDb').value = store.get('nova_db', '') || s.nova_db;
+    $('rounds').value = store.get('rounds', '') || s.rounds;
+    $('rebrickableKey').value = store.get('rebrickable_key', '');
+    if (!$('rebrickableKey').value) $('settings').open = true;
+  }
+  for (const [id, key] of [['novaUrl', 'nova_url'], ['novaDb', 'nova_db'], ['rounds', 'rounds'], ['rebrickableKey', 'rebrickable_key']]) {
+    $(id).addEventListener('change', () => store.set(key, $(id).value.trim()));
+  }
+
+  async function loadNova() {
+    const q = '?nova_url=' + encodeURIComponent($('novaUrl').value.trim());
+    try {
+      const [m, c] = await Promise.all([api('/api/nova/models' + q), api('/api/nova/chats' + q)]);
+      $('modelFile').innerHTML = '<option value="">Newest model from the chosen chat</option>' +
+        m.models.map(x => `<option value="${esc(x.file)}">${esc(x.name)}${x.parts ? ' (' + x.parts + ' parts)' : ''}</option>`).join('');
+      $('chatId').innerHTML = '<option value="latest">Most recent chat</option>' +
+        c.chats.map(x => `<option value="${esc(x.id)}">${esc(x.title || x.id)}</option>`).join('');
+      $('novaState').textContent = `Nova is up: ${m.models.length} model(s), ${c.chats.length} chat(s)`;
+      $('novaState').classList.remove('err');
+    } catch (e) {
+      $('novaState').textContent = 'Nova is not reachable at ' + $('novaUrl').value + '. Start it with docker compose up -d.';
+      $('novaState').classList.add('err');
+      $('modelFile').innerHTML = '<option value="">Nova is not reachable</option>';
+    }
+  }
+  $('novaUrl').addEventListener('change', loadNova);
+  $('existing').addEventListener('toggle', () => {
+    $('runBtn').textContent = $('existing').open ? 'Check and repair' : 'Design and check';
+  });
+
+  // start a run
+  $('briefForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    $('formError').textContent = '';
+    const body = {
+      nova_url: $('novaUrl').value.trim(), nova_db: $('novaDb').value.trim(),
+      rounds: Number($('rounds').value) || 3, rebrickable_key: $('rebrickableKey').value.trim(),
+    };
+    if ($('existing').open) {
+      body.model_file = $('modelFile').value; body.chat_id = $('chatId').value || 'latest';
+    } else {
+      body.prompt = $('prompt').value.trim();
+      if (!body.prompt) { $('formError').textContent = 'Describe the model first, or open "start from a model you already have".'; return; }
+    }
+    $('runBtn').disabled = true;
+    try {
+      const run = await api('/api/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      show(run); loadHistory();
+    } catch (err) {
+      $('formError').textContent = err.message;
+    } finally {
+      $('runBtn').disabled = false;
+    }
+  });
+
+  // history
+  async function loadHistory() {
+    const { runs } = await api('/api/runs');
+    if (!runs.length) return;
+    $('history').innerHTML = runs.map(r => `<li><button type="button" data-id="${r.id}">
+      <b>${esc(title(r))}</b><br><span class="small muted">${esc(when(r.started_at))} · ${esc(summary(r))}</span></button></li>`).join('');
+    $('history').querySelectorAll('button').forEach(b => b.onclick = async () => show(await api('/api/runs/' + b.dataset.id)));
+  }
+  const title = r => r.request.prompt ? clip(r.request.prompt, 80) : (r.request.model_file || 'Newest model in ' + (r.request.chat_id || 'the latest chat'));
+  const clip = (text, n) => text.length <= n ? text : text.slice(0, n).replace(/\s+\S*$/, '') + '…';
+  const when = t => new Date(t * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+  const summary = r => r.status === 'done' ? (r.result && r.result.clean ? 'clean' : 'stopped: ' + (r.result ? r.result.reason : '')) : r.status;
+
+  // the build sheet
+  let current = null, source = null;
+  function show(run) {
+    current = run;
+    $('emptySheet').hidden = true; $('runSheet').hidden = false;
+    render(run);
+    if (source) { source.close(); source = null; }
+    if (!['done', 'failed', 'stopped'].includes(run.status)) {
+      source = new EventSource('/api/runs/' + run.id + '/events');
+      source.addEventListener('snapshot', e => render(current = JSON.parse(e.data)));
+      source.addEventListener('status', e => { const d = JSON.parse(e.data); current.status = d.status; current.phase = d.phase; render(current); });
+      source.addEventListener('phase', e => { current.phase = JSON.parse(e.data).phase; render(current); });
+      source.addEventListener('chat', e => { Object.assign(current, JSON.parse(e.data)); render(current); });
+      source.addEventListener('round', e => {
+        const d = JSON.parse(e.data);
+        current.rounds = current.rounds.filter(r => r.number !== d.number).concat([d]).sort((a, b) => a.number - b.number);
+        render(current);
+      });
+      source.addEventListener('log', e => { current.log.push(JSON.parse(e.data).text); render(current); });
+      source.addEventListener('finished', e => { render(current = JSON.parse(e.data)); source.close(); source = null; loadHistory(); loadNova(); });
+    }
+  }
+  $('stopBtn').onclick = async () => { if (current) { await api('/api/runs/' + current.id + '/stop', { method: 'POST' }); toast('Stopping after the current step'); } };
+
+  function render(run) {
+    $('runTitle').textContent = title(run);
+    $('runMeta').textContent = 'Started ' + when(run.started_at) + (run.request.availability ? '' : ' · availability not checked (no Rebrickable key)');
+    const live = !['done', 'failed', 'stopped'].includes(run.status);
+    $('stopBtn').hidden = !live;
+    $('chatLink').hidden = !run.chat_url; if (run.chat_url) $('chatLink').href = run.chat_url;
+    const st = $('runStatus'); st.className = 'status ' + (live ? 'live' : run.status === 'done' && run.result && run.result.clean ? 'done' : run.status === 'failed' ? 'failed' : '');
+    $('statusText').textContent = {
+      queued: 'Starting', designing: 'Nova is designing the model', checking: 'Checking the model',
+      repairing: 'The agent is repairing the model', done: 'Finished', failed: 'Failed', stopped: 'Stopped',
+    }[run.status] || run.status;
+    $('phaseText').textContent = live ? (run.phase || '') : '';
+
+    $('roundsTable').hidden = !run.rounds.length;
+    $('roundsBody').innerHTML = run.rounds.map(r => `<tr>
+      <td>${r.number}</td>
+      <td class="small">${esc(r.model)}</td>
+      <td class="num">${r.pieces ?? ''}</td>
+      <td class="num">${r.errors == null ? '' : r.errors + (r.warnings ? ' + ' + r.warnings + ' warning' + (r.warnings === 1 ? '' : 's') : '')}</td>
+      <td>${studs(r)}</td>
+      <td class="small">${agentCell(r, run)}</td>
+    </tr>`).join('');
+
+    const o = $('outcome');
+    if (run.status === 'done' || run.status === 'stopped' || run.status === 'failed') {
+      o.hidden = false;
+      const clean = run.result && run.result.clean;
+      o.className = 'outcome ' + (run.status === 'failed' ? 'failed' : clean ? 'clean' : 'stopped');
+      o.innerHTML = run.status === 'failed'
+        ? `<b>The run failed.</b> ${esc(run.error || '')}`
+        : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.`
+        : `<b>Stopped before the model was clean.</b> ${esc(run.result ? run.result.reason : '')} The files below are for the last model checked.`;
+    } else { o.hidden = true; }
+
+    const hasFiles = !live && run.files && run.files.length;
+    $('results').hidden = !hasFiles;
+    if (hasFiles) renderFiles(run);
+    $('logText').textContent = run.log.join('\n');
+  }
+
+  function studs(r) {
+    if (r.errors == null) return '<span class="studs"><span class="stud pending"></span></span>';
+    const total = r.errors + r.warnings;
+    if (!total) return '<span class="studs" title="clean"><span class="stud clean"></span></span>';
+    const n = Math.min(total, 24);
+    let html = '';
+    for (let i = 0; i < n; i++) html += `<span class="stud ${i < r.errors ? 'bad' : 'warn'}"></span>`;
+    return `<span class="studs" title="${r.errors} error(s), ${r.warnings} warning(s)">${html}${total > 24 ? '<span class="small muted">+' + (total - 24) + '</span>' : ''}</span>`;
+  }
+  function agentCell(r, run) {
+    if (r.agent_error) return '<span class="err">' + esc(r.agent_error) + '</span>';
+    if (r.agent_seconds != null) return 'repaired in ' + r.agent_seconds + ' s';
+    if (r.sent) return 'working…';
+    if (r.clean) return 'nothing to fix';
+    return r.errors == null ? '' : 'not sent';
+  }
+
+  const fileNotes = {
+    'bricklink_wanted.xml': 'Wanted list for BrickLink',
+    'parts.csv': 'Every part and colour with quantities',
+    'instructions.mpd': 'Build steps, open in LPub3D',
+    'flat.ldr': 'All pieces in one file, for Rebrickable',
+    'availability.csv': 'Each part and colour, was it ever made',
+    'report.md': 'Problems found',
+    'feedback.md': 'Repair request for the agent',
+  };
+  async function renderFiles(run) {
+    const base = '/api/runs/' + run.id + '/files/';
+    const order = ['bricklink_wanted.xml', 'instructions.mpd', 'parts.csv', 'flat.ldr', 'availability.csv'];
+    const files = order.filter(f => run.files.includes(f));
+    $('files').innerHTML = files.map(f => `<div class="file"><b>${esc(f)}</b><span class="small muted">${esc(fileNotes[f] || '')}</span>
+      <div class="row"><a class="btn quiet small" href="${base + f}?download=1">Download</a>${f === 'bricklink_wanted.xml' ? '<button class="btn quiet small" type="button" data-copy="' + f + '">Copy for BrickLink</button>' : ''}</div></div>`).join('');
+    $('files').querySelectorAll('[data-copy]').forEach(b => b.onclick = async () => {
+      const text = await fetch(base + b.dataset.copy).then(r => r.text());
+      try { await navigator.clipboard.writeText(text); toast('Copied. On BrickLink choose Want, Upload, then "Upload BrickLink XML format" and paste.'); }
+      catch { toast('Could not copy; download the file instead.'); }
+    });
+    $('reportText').textContent = run.files.includes('report.md') ? await fetch(base + 'report.md').then(r => r.text()) : '';
+    const fb = run.files.includes('feedback.md');
+    $('feedbackWrap').hidden = !fb;
+    if (fb) $('feedbackText').textContent = await fetch(base + 'feedback.md').then(r => r.text());
+  }
+
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  loadSettings().then(() => { loadNova(); loadHistory(); });
+})();
+</script>
+</body>
+</html>
