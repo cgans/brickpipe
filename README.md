@@ -14,6 +14,9 @@ to actually build it:
 | `availability.csv` | With `--availability`: whether each part was ever made in that colour |
 | `feedback.md` | When there is something to fix: a repair request for the agent that designed the model |
 
+With Nova's database and the LDraw part library present, the report also says
+whether every piece is clipped to the model (see below).
+
 Python 3.10 or newer. No third-party packages.
 
 ## The page
@@ -78,6 +81,32 @@ Rebrickable allows roughly one request per second. Responses are cached for 30
 days in `~/.cache/brickpipe/rebrickable` (change with `--cache-dir`), so later
 runs are instant. If the check cannot run, the report says so and everything
 else is still produced.
+
+### Check that the pieces clip together
+
+```
+python -m brickpipe model.mpd -o out/ --nova-db ../ldraw-nova/data/ldraw-info.db --ldraw-dir C:\LDraw
+```
+
+Needs two things, both found automatically when they are in the usual places:
+
+- **The LDraw part library.** Get it once with `python -m brickpipe --get-ldraw`
+  (about 150 MB, free, from ldraw.org; kept in brickpipe's own folder), or press
+  "Download the library" in the page's settings. A folder with `parts/` and
+  `p/`, or LPub3D's `complete.zip`, also works via `--ldraw-dir` or `LDRAW_DIR`.
+  A part's studs are references to the `stud.dat` primitive in its official
+  geometry, so the geometry has to be read.
+- **Nova's shadow library** (`data/offLibShadow` next to its database): LDCad's
+  connector records, which say where each part's sockets, pins and holes are.
+
+A piece counts as attached when one of its studs, pins or axles sits exactly
+in a matching socket or hole on another piece. Pieces that nothing attaches to
+are errors and go into `feedback.md`. Pieces held only by clips, hinges or
+bars, or with no connector data, are reported as unverified rather than
+flagged. Overlapping geometry (a tyre on a rim) counts as a press fit.
+
+This is still not a proof that the model stands up; it is a proof that it can
+be assembled.
 
 ### Send the problems back to the agent
 
@@ -171,9 +200,12 @@ which adds a setup check and the Windows-specific commands.
   been renamed, and drawing geometry used as if it were a piece.
 - **Floating** (needs `--nova-db`): groups of pieces whose bounding boxes touch
   nothing in the main structure.
+- **Connectivity** (needs `--nova-db` and the LDraw library): pieces that no
+  stud, pin or axle joins to the model.
 
-Not covered: whether touching pieces really clip together, whether the model
-stands up, and whether a part that exists is in stock or affordable today.
+Not covered: whether the model stands up under gravity, connections made by
+clips, hinges and bars, and whether a part that exists is in stock or
+affordable today.
 
 ## Known limits
 
@@ -190,8 +222,8 @@ stands up, and whether a part that exists is in stock or affordable today.
 
 ## Next steps
 
-1. Stud-level connectivity for ordinary bricks and plates.
-2. Price estimate per model.
+1. Price estimate per model (needs a BrickLink API key).
+2. Clip, hinge and bar connections in the connectivity check.
 
 ## Notes for Nova
 

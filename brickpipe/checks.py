@@ -197,6 +197,58 @@ def check_floating(
     return out
 
 
+def check_connectivity(
+    pieces: list[PlacedPart], connectors, catalog: PartCatalog | None
+) -> list[Finding]:
+    """Pieces that no stud, pin or axle attaches to the rest of the model.
+
+    `connectors` is a connectivity.Connectors built from the LDraw library and
+    the shadow library. Needs both; the caller decides whether to run it.
+    """
+    from . import connectivity
+
+    boxes = [world_box(p, catalog) if catalog else None for p in pieces]
+    report = connectivity.analyse(pieces, connectors, boxes if catalog else None)
+    out: list[Finding] = []
+    if len(report.groups) <= 1:
+        pass
+    else:
+        unverified = set(report.unverified)
+        unknown = set(report.unknown)
+        for group in report.groups[1:]:
+            members = [i for i in group if i not in unknown]
+            if not members:
+                continue
+            firm = [i for i in members if i not in unverified]
+            sample = pieces[members[0]]
+            where = " > ".join(sample.path[1:]) or "main model"
+            if firm:
+                out.append(Finding(
+                    "error", "connectivity",
+                    f"{len(members)} piece(s) are not clipped to the model: no stud, pin "
+                    f"or axle joins them to it (e.g. {sample.part} in {where} at "
+                    f"{tuple(round(v, 1) for v in sample.pos)})",
+                    "Move these pieces so their studs or sockets line up with the pieces "
+                    "they should attach to, or add the pieces that would join them.",
+                    tuple(pieces[i] for i in members),
+                ))
+            else:
+                out.append(Finding(
+                    "warning", "connectivity",
+                    f"{len(members)} piece(s) are attached only by a clip, hinge or bar, "
+                    f"which this check cannot verify (e.g. {sample.part} in {where})",
+                    "", tuple(pieces[i] for i in members),
+                ))
+    if report.unknown:
+        parts = sorted({pieces[i].part for i in report.unknown})
+        out.append(Finding(
+            "warning", "connectivity",
+            f"{len(report.unknown)} piece(s) have no connector data, so their attachment "
+            f"was not checked: {', '.join(parts[:8])}{'…' if len(parts) > 8 else ''}",
+        ))
+    return out
+
+
 def nearest_gap(group, main) -> tuple[float, float, float]:
     """Per-axis gap between the closest pair of boxes from the two sets."""
     best = None

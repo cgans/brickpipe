@@ -3,16 +3,17 @@ from __future__ import annotations
 
 import argparse
 import sys
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import availability, bom, checks, feedback, ldraw, nova, rebrickable, steps
+from . import availability, bom, checks, connectivity, feedback, ldraw, nova, rebrickable, steps
 from .catalog import PartCatalog, load_colours
 
 
 def build_report(
     name, pieces, rows, findings, stepped, skipped, catalog_used,
-    availability_note=None, has_feedback=False,
+    availability_note=None, has_feedback=False, connectivity_note=None,
 ) -> str:
     errors = [f for f in findings if f.level == "error"]
     warnings = [f for f in findings if f.level == "warning"]
@@ -33,6 +34,8 @@ def build_report(
         ]
     if availability_note:
         lines += [availability_note, ""]
+    if connectivity_note:
+        lines += [connectivity_note, ""]
     for title, group in (("Errors", errors), ("Warnings", warnings)):
         if group:
             lines.append(f"## {title}")
@@ -101,13 +104,22 @@ def run_pipeline(
     check_availability: bool = False,
     cache_dir: Path | None = None,
     client: rebrickable.Client | None = None,
+    ldraw_dir: Path | None = None,
+    shadow_dir: Path | None = None,
 ) -> Result:
     """Run every check on `model` and write the outputs. Raises PipelineError."""
     model = Path(model)
     try:
         doc = ldraw.load(model)
         catalog = PartCatalog(nova_db) if nova_db else None
-    except (OSError, ValueError) as err:
+        connectors = None
+        shadow_path = shadow_dir or connectivity.find_shadow_library(nova_db)
+        ldraw_path = ldraw_dir or (connectivity.find_ldraw_library() if shadow_path else None)
+        if shadow_path and ldraw_path:
+            connectors = connectivity.Connectors(
+                connectivity.PartLibrary(ldraw_path), connectivity.ShadowLibrary(shadow_path)
+            )
+    except (OSError, ValueError, zipfile.BadZipFile) as err:
         raise PipelineError(str(err)) from None
     colours = load_colours()
 
@@ -129,12 +141,34 @@ def run_pipeline(
     if catalog:
         findings += checks.check_parts(pieces, catalog)
         findings += checks.check_floating(pieces, catalog)
+    if connectors:
+        findings += checks.check_connectivity(pieces, connectors, catalog)
+        connectors.parts.close()
 
     stepped = (
         [] if keep_steps
         else steps.add_steps_everywhere(doc, catalog, max_step_parts)
     )
     findings += checks.check_steps(doc, max_step_parts)
+
+    connectivity_note = None
+    if connectors:
+        n_conn = sum(1 for f in findings if f.check == "connectivity")
+        connectivity_note = (
+            "Stud connectivity was checked: every piece is joined to the model by a "
+            "stud, pin or axle." if not n_conn else
+            "Stud connectivity was checked; see the connectivity findings below."
+        )
+    if not connectors:
+        missing = []
+        if not shadow_path:
+            missing.append("LDraw Nova's shadow library (next to its database)")
+        if not ldraw_path:
+            missing.append("the LDraw part library (--ldraw-dir)")
+        connectivity_note = (
+            "The stud connectivity check was skipped because it could not find "
+            + " and ".join(missing) + "."
+        )
 
     name = model.stem
     out = out or model.with_name(f"{name}-brickpipe")
@@ -178,7 +212,7 @@ def run_pipeline(
         feedback_path.unlink()  # an earlier run's request no longer applies
     report = build_report(
         name, pieces, rows, findings, stepped, skipped, bool(catalog),
-        availability_note, bool(request),
+        availability_note, bool(request), connectivity_note,
     )
     (out / "report.md").write_text(report, encoding="utf-8")
 
@@ -198,7 +232,7 @@ def run_loop(args, client: rebrickable.Client | None) -> int:
             max_rounds=args.rounds, approve_tools=not args.ask_tools,
             nova_db=args.nova_db, max_step_parts=args.max_step_parts,
             keep_steps=args.keep_steps, check_availability=args.availability,
-            cache_dir=args.cache_dir, client=client,
+            cache_dir=args.cache_dir, client=client, ldraw_dir=args.ldraw_dir,
         )
     except (nova.NovaError, PipelineError) as err:
         print(f"brickpipe: {err}", file=sys.stderr)
@@ -217,12 +251,23 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
         description="Turn an LDraw model into a parts list, a BrickLink wanted "
         "list and a step-ordered file for LPub3D.",
     )
-    parser.add_argument("model", type=Path, help="LDraw .ldr or .mpd file")
+    parser.add_argument("model", type=Path, nargs="?", help="LDraw .ldr or .mpd file")
     parser.add_argument("-o", "--out", type=Path, default=None, help="output folder")
     parser.add_argument(
         "--nova-db", type=Path, default=None,
         help="path to LDraw Nova's data/ldraw-info.db (adds part names, part "
         "checks, better step ordering and the floating-piece check)",
+    )
+    parser.add_argument(
+        "--ldraw-dir", type=Path, default=None,
+        help="the LDraw part library: a folder with parts/ and p/, or LPub3D's "
+        "complete.zip (found automatically in the usual places). With --nova-db, "
+        "enables the stud connectivity check.",
+    )
+    parser.add_argument(
+        "--get-ldraw", action="store_true",
+        help="download the LDraw part library (about 150 MB, from ldraw.org) into "
+        "brickpipe's own folder and exit; later runs find it automatically",
     )
     parser.add_argument(
         "--max-step-parts", type=int, default=8, help="most pieces per build step"
@@ -266,6 +311,20 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
     )
     args = parser.parse_args(argv)
 
+    if args.get_ldraw:
+        def progress(done, total):
+            print(f"\r  {done / 1048576:.0f} of {total / 1048576:.0f} MB" if total else f"\r  {done / 1048576:.0f} MB",
+                  end="", flush=True)
+        try:
+            path = connectivity.download_library(progress=progress)
+        except OSError as err:
+            print(f"\nbrickpipe: download failed: {err}", file=sys.stderr)
+            return 2
+        print(f"\nSaved {path}")
+        return 0
+    if args.model is None:
+        parser.error("a model file is required (or --get-ldraw)")
+
     if args.nova_chat:
         return run_loop(args, client)
 
@@ -273,7 +332,7 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
         result = run_pipeline(
             args.model, args.out, nova_db=args.nova_db, max_step_parts=args.max_step_parts,
             keep_steps=args.keep_steps, check_availability=args.availability,
-            cache_dir=args.cache_dir, client=client,
+            cache_dir=args.cache_dir, client=client, ldraw_dir=args.ldraw_dir,
         )
     except PipelineError as err:
         print(f"brickpipe: {err}", file=sys.stderr)

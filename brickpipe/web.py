@@ -26,7 +26,7 @@ from pathlib import Path
 import urllib.parse
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import loop, nova, rebrickable
+from . import connectivity, loop, nova, rebrickable
 from .cli import PipelineError, run_pipeline
 
 DEFAULT_PORT = 8766
@@ -165,6 +165,7 @@ class Runner:
         key = req.get("rebrickable_key") or ""
         client = rebrickable.Client(key=key, cache_dir=rebrickable.default_cache_dir()) if key else None
         nova_db = Path(req["nova_db"]) if req.get("nova_db") else None
+        ldraw_dir = Path(req["ldraw_dir"]) if req.get("ldraw_dir") else None
 
         def set_status(status: str, phase: str = "") -> None:
             run.status, run.phase = status, phase
@@ -254,6 +255,7 @@ class Runner:
                 log=run.note, on_event=on_event, on_round=on_round,
                 stop=lambda: run.stop_requested,
                 nova_db=nova_db, check_availability=bool(client), client=client,
+                ldraw_dir=ldraw_dir,
             )
             run.result = {
                 "clean": outcome.clean, "reason": outcome.stopped_because,
@@ -398,7 +400,9 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(self.page)
             return
         if path == "/api/settings":
-            return self.send_json(self.settings)
+            found = connectivity.find_ldraw_library()
+            return self.send_json({**self.settings, "ldraw_dir": str(found or ""),
+                                   "ldraw_download": self.ldraw_download})
         if path == "/api/runs":
             runs = sorted(self.runner.runs.values(), key=lambda r: r.started_at, reverse=True)
             return self.send_json({"runs": [r.public() for r in runs[:50]]})
@@ -424,8 +428,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_file(m[1], m[2])
         self.send_json({"error": "not found"}, 404)
 
+    ldraw_download: dict = {"state": "idle"}
+
     def do_POST(self):
         path = urlparse(self.path).path
+        if path == "/api/ldraw/download":
+            return self.start_ldraw_download()
         if path == "/api/runs":
             body = self.read_json()
             if not (body.get("prompt") or body.get("chat_id") or body.get("model_file")):
@@ -441,6 +449,26 @@ class Handler(BaseHTTPRequestHandler):
             run.note("Stop requested; finishing the current step")
             return self.send_json({"stopping": True})
         self.send_json({"error": "not found"}, 404)
+
+    def start_ldraw_download(self):
+        state = type(self).ldraw_download
+        if state.get("state") == "running":
+            return self.send_json(state, 202)
+        state.update(state="running", done=0, total=0, error=None, path=None)
+
+        def progress(done, total):
+            state.update(done=done, total=total)
+
+        def work():
+            try:
+                path = connectivity.download_library(progress=progress)
+                state.update(state="done", path=str(path))
+                self.settings["ldraw_dir"] = str(path)
+            except Exception as err:  # noqa: BLE001
+                state.update(state="failed", error=str(err))
+
+        threading.Thread(target=work, daemon=True).start()
+        return self.send_json(state, 202)
 
     def proxy_nova(self, fn):
         nova_url = parse_qs(urlparse(self.path).query).get("nova_url", [nova.DEFAULT_URL])[0]
@@ -511,6 +539,7 @@ def make_server(port: int = DEFAULT_PORT, runs_dir: Path | None = None,
         "version": __version__,
         "nova_url": nova_url,
         "nova_db": nova_db if nova_db is not None else guess_nova_db(here),
+        "ldraw_dir": str(connectivity.find_ldraw_library() or ""),
         "rounds": 3,
     }
     handler.page = resources.files("brickpipe").joinpath("web/index.html").read_bytes()
