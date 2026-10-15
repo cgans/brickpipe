@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from .bom import BomRow
 from .catalog import PartCatalog
+from .ldraw import PlacedPart
 from .checks import Finding
 from .rebrickable import Client
 
@@ -139,26 +140,39 @@ def check(
         else:
             made = {c["color_id"]: c for c in produced[row.part]}
             hit = made.get(colour["id"])
+            common = sorted(made.values(), key=lambda c: -c.get("num_sets", 0))
             if hit is None:
                 item.status = NOT_MADE
-                common = sorted(made.values(), key=lambda c: -c.get("num_sets", 0))
                 item.alternatives = [c.get("color_name", "") for c in common[:5]]
             else:
                 item.sets = hit.get("num_sets", 0)
                 item.status = RARE if item.sets <= RARE_SETS else OK
+                if item.status == RARE:
+                    item.alternatives = [
+                        c.get("color_name", "") for c in common[:5]
+                        if c.get("color_id") != colour["id"]
+                    ]
         results.append(item)
     return results
 
 
-def findings(results: list[Availability]) -> list[Finding]:
+def findings(
+    results: list[Availability], pieces: list[PlacedPart] | None = None
+) -> list[Finding]:
     out: list[Finding] = []
     for a in results:
         what = f"{a.row.quantity}x {a.row.part}"
+        used = tuple(
+            p for p in pieces or () if (p.part, p.colour) == (a.row.part, a.row.colour)
+        )
         if a.status == NOT_MADE:
             alt = f" It was made in: {', '.join(a.alternatives)}." if a.alternatives else ""
             out.append(Finding(
                 "error", "availability",
                 f"{what} was never produced in {a.colour_name or a.row.colour}.{alt}",
+                "Recolour these pieces to a colour the part was made in, or swap "
+                "them for a similar part that exists in the wanted colour.",
+                used,
             ))
         elif a.status == PART_UNKNOWN:
             out.append(Finding(
@@ -169,14 +183,26 @@ def findings(results: list[Availability]) -> list[Finding]:
             out.append(Finding(
                 "warning", "availability",
                 f"{what}: LDraw colour {a.row.colour} is unknown to Rebrickable",
+                "Use a standard LDraw colour code for these pieces.", used,
             ))
-    rare = [a for a in results if a.status == RARE]
-    if rare:
-        pieces = sum(a.row.quantity for a in rare)
+    for a in results:
+        if a.status != RARE:
+            continue
+        used = tuple(
+            p for p in pieces or () if (p.part, p.colour) == (a.row.part, a.row.colour)
+        )
+        sets = "1 set" if a.sets == 1 else f"{a.sets} sets"
+        alt = (
+            f" More common colours for this part: {', '.join(a.alternatives)}."
+            if a.alternatives else ""
+        )
         out.append(Finding(
             "warning", "availability",
-            f"{len(rare)} part and colour combination(s) ({pieces} pieces) appear in "
-            f"{RARE_SETS} sets or fewer and may be scarce; see availability.csv",
+            f"{a.row.quantity}x {a.row.part} in {a.colour_name or a.row.colour} appears "
+            f"in only {sets}, so it may be scarce or expensive.{alt}",
+            "If the design allows, recolour these pieces to a more common colour "
+            "for this part; otherwise leave them and say so.",
+            used,
         ))
     return out
 
