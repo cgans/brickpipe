@@ -46,6 +46,37 @@ class FlattenTests(unittest.TestCase):
         _, problems = ldraw.flatten(doc)
         self.assertIn("loop", problems[0])
 
+    def test_embedded_part_definition_is_one_piece(self):
+        doc = ldraw.parse(
+            "0 FILE a.ldr\n"
+            "1 4 0 0 0 1 0 0 0 1 0 0 0 1 kit-01-42082---13971.dat\n"
+            "1 4 40 0 0 1 0 0 0 1 0 0 0 1 kit-01-42082---13971.dat\n"
+            "0 FILE kit-01-42082---13971.dat\n"
+            "1 16 0 0 0 1 0 0 0 1 0 0 0 1 4-4cylo.dat\n"
+            "1 16 0 0 0 1 0 0 0 1 0 0 0 1 kit-02-42082---13971s01.dat\n"
+            "0 FILE kit-02-42082---13971s01.dat\n"
+            "1 16 0 0 0 1 0 0 0 1 0 0 0 1 4-4ring3.dat\n"
+        )
+        pieces, problems = ldraw.flatten(doc)
+        self.assertEqual(problems, [])
+        self.assertEqual([p.part for p in pieces], ["13971", "13971"])
+        self.assertEqual(pieces[0].embedded_as, "kit-01-42082---13971.dat")
+        found = checks.check_embedded(pieces)
+        self.assertEqual(len(found), 1)
+        self.assertIn("2 piece(s)", found[0].message)
+
+    def test_part_definitions_get_no_build_steps(self):
+        body = "".join(
+            f"1 16 0 {y} 0 1 0 0 0 1 0 0 0 1 4-4cylo.dat\n" for y in range(0, 200, 8)
+        )
+        text = (
+            "0 FILE a.ldr\n1 4 0 0 0 1 0 0 0 1 0 0 0 1 own.dat\n"
+            "0 FILE own.dat\n" + body
+        )
+        doc = ldraw.parse(text)
+        self.assertEqual(steps.add_steps_everywhere(doc, max_parts=8), [])
+        self.assertEqual(ldraw.dump(doc).count("0 STEP"), 0)
+
     def test_plain_ldr_without_file_header(self):
         doc = ldraw.parse("0 Title\n1 4 0 0 0 1 0 0 0 1 0 0 0 1 3001.dat\n", "x.ldr")
         pieces, _ = ldraw.flatten(doc)

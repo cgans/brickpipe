@@ -105,4 +105,8 @@ def add_steps_everywhere(
     doc: Document, catalog: PartCatalog | None = None, max_parts: int = 8
 ) -> list[str]:
     """Tighten steps in every submodel. Returns the names changed."""
-    return [m.name for m in doc.models.values() if add_steps(m, catalog, max_parts)]
+    return [
+        m.name
+        for key, m in doc.models.items()
+        if not is_part_file(key) and add_steps(m, catalog, max_parts)
+    ]
