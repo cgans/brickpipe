@@ -104,6 +104,11 @@ details > summary { cursor: pointer; font-weight: 700; margin-bottom: 10px; }
 .activity summary b { white-space: nowrap; }
 .activity summary code { font-family: ui-monospace, Consolas, monospace; font-size: .85rem; color: var(--ink-2); overflow-wrap: anywhere; }
 .activity summary .spin { color: var(--warn); }
+.activity .renders { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+.activity .renders img { max-height: 180px; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+.thumb { width: 72px; height: 54px; object-fit: contain; border: 1px solid var(--line); border-radius: 4px; background: #fff; vertical-align: middle; margin-right: 8px; }
+.final-render { margin-top: 12px; }
+.final-render img { max-width: 100%; max-height: 420px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .activity pre { margin: 6px 0 0; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; font-size: .8rem; max-height: 220px; overflow: auto; white-space: pre-wrap; }
 .status { display: inline-flex; align-items: center; gap: 8px; font-weight: 700; }
 .status .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink-2); }
@@ -431,7 +436,7 @@ ul.history button:hover b { text-decoration: underline; }
     $('roundsTable').hidden = !run.rounds.length;
     $('roundsBody').innerHTML = run.rounds.map(r => `<tr>
       <td>${r.number}</td>
-      <td class="small">${esc(r.model)}</td>
+      <td class="small">${r.image ? `<img class="thumb" src="${esc(r.image)}" alt="">` : ''}${esc(r.model)}</td>
       <td class="num">${r.pieces ?? ''}</td>
       <td class="num">${r.errors == null ? '' : r.errors + (r.warnings ? ' + ' + r.warnings + ' warning' + (r.warnings === 1 ? '' : 's') : '')}</td>
       <td>${studs(r)}</td>
@@ -445,7 +450,7 @@ ul.history button:hover b { text-decoration: underline; }
       o.className = 'outcome ' + (run.status === 'failed' ? 'failed' : clean ? 'clean' : 'stopped');
       o.innerHTML = run.status === 'failed'
         ? `<b>The run failed.</b> ${esc(run.error || '')}`
-        : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.`
+        : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.` + finalRender(run)
         : `<b>Stopped before the model was clean.</b> ${esc(run.result ? run.result.reason : '')} The files below are for the last model checked.`;
     } else { o.hidden = true; }
 
@@ -468,10 +473,16 @@ ul.history button:hover b { text-decoration: underline; }
   const openActivity = new Set();
   function renderActivity(run) {
     const items = (run.activity || []).slice(-40);
-    $('activity').innerHTML = items.map(a => `<li><details ${openActivity.has(a.id) ? 'open' : ''} data-id="${esc(a.id)}">
+    $('activity').innerHTML = items.map(a => `<li><details ${openActivity.has(a.id) || (a.images && a.images.length) ? 'open' : ''} data-id="${esc(a.id)}">
       <summary><b>${esc(a.label)}</b><code>${esc(a.detail)}</code>${a.done ? '' : '<span class="spin">running…</span>'}</summary>
+      ${a.images && a.images.length ? `<div class="renders">${a.images.map(u => `<a href="${esc(u)}" target="_blank" rel="noreferrer"><img src="${esc(u)}" alt="render the agent looked at"></a>`).join('')}</div>` : ''}
       ${a.output ? `<pre>${esc(a.output.slice(-3000))}</pre>` : ''}</details></li>`).reverse().join('');
     $('activity').querySelectorAll('details').forEach(d => d.addEventListener('toggle', () => d.open ? openActivity.add(d.dataset.id) : openActivity.delete(d.dataset.id)));
+  }
+
+  function finalRender(run) {
+    const last = run.rounds.filter(r => r.image).slice(-1)[0];
+    return last ? `<div class="final-render"><a href="${esc(last.image)}" target="_blank" rel="noreferrer"><img src="${esc(last.image)}" alt="render of the final model"></a></div>` : '';
   }
 
   function studs(r) {

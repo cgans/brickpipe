@@ -191,6 +191,11 @@ class Runner:
                 entry = run.tools_running.pop(data.get("id"), None)
                 if entry is not None:
                     entry["done"] = True
+                    if entry["name"] == "view_image":
+                        try:
+                            entry["images"] = agent.latest_images(run.chat_id)
+                        except nova.NovaError:
+                            pass
                     run.emit("activity", entry)
             elif event == "text" and data.get("delta"):
                 run.agent_text = (run.agent_text + str(data["delta"]))[-8000:]
@@ -203,11 +208,19 @@ class Runner:
             elif event == "turn_error":
                 run.note(f"Nova reported an error: {data.get('message', '')}")
 
+        def model_images() -> dict[str, str]:
+            try:
+                return {m.file: agent.absolute(m.image_url) for m in agent.models(run.chat_id)
+                        if m.image_url}
+            except nova.NovaError:
+                return {}
+
         def on_round(rnd: loop.Round) -> None:
             if rnd.sent and not rnd.turn:
                 run.agent_text = ""  # a new turn is starting
                 run.emit("agent_text", {"text": ""})
             entry = round_dict(rnd)
+            entry["image"] = model_images().get(entry["model"])
             run.rounds = [r for r in run.rounds if r["number"] != entry["number"]] + [entry]
             run.rounds.sort(key=lambda r: r["number"])
             set_status("repairing" if rnd.sent and not rnd.turn else "checking", run.phase)
@@ -228,6 +241,9 @@ class Runner:
                 "final_model": outcome.final_model.name if outcome.final_model else None,
             }
             run.status = "stopped" if run.stop_requested else "done"
+            images = model_images()  # snapshots may have finished rendering since
+            for entry in run.rounds:
+                entry["image"] = entry.get("image") or images.get(entry["model"])
         except (nova.NovaError, PipelineError, rebrickable.RebrickableError) as err:
             run.error = str(err)
             run.status = "failed"
