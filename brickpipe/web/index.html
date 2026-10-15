@@ -107,6 +107,10 @@ details > summary { cursor: pointer; font-weight: 700; margin-bottom: 10px; }
 .activity .renders { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .activity .renders img { max-height: 180px; max-width: 100%; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
 .thumb { width: 72px; height: 54px; object-fit: contain; border: 1px solid var(--line); border-radius: 4px; background: #fff; vertical-align: middle; margin-right: 8px; }
+.viewer-wrap { margin-top: 12px; }
+.viewer-tabs { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; }
+.viewer-tabs .btn.on { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+.viewer-frame { width: 100%; height: 480px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .final-render { margin-top: 12px; }
 .final-render img { max-width: 100%; max-height: 420px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .activity pre { margin: 6px 0 0; padding: 8px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; font-size: .8rem; max-height: 220px; overflow: auto; white-space: pre-wrap; }
@@ -444,7 +448,7 @@ ul.history button:hover b { text-decoration: underline; }
     $('roundsTable').hidden = !run.rounds.length;
     $('roundsBody').innerHTML = run.rounds.map(r => `<tr>
       <td>${r.number}</td>
-      <td class="small">${r.image ? `<img class="thumb" src="${esc(r.image)}" alt="">` : ''}${esc(r.model)}</td>
+      <td class="small">${r.image ? `<img class="thumb" src="${esc(r.image)}" alt="">` : ''}${esc(r.model)}${r.viewer ? ` <button type="button" class="btn quiet small" data-view="${r.number}">3D</button>` : ''}</td>
       <td class="num">${r.pieces ?? ''}</td>
       <td class="num">${r.errors == null ? '' : r.errors + (r.warnings ? ' + ' + r.warnings + ' warning' + (r.warnings === 1 ? '' : 's') : '')}</td>
       <td>${studs(r)}</td>
@@ -458,9 +462,10 @@ ul.history button:hover b { text-decoration: underline; }
       o.className = 'outcome ' + (run.status === 'failed' ? 'failed' : clean ? 'clean' : 'stopped');
       o.innerHTML = run.status === 'failed'
         ? `<b>The run failed.</b> ${esc(run.error || '')}`
-        : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.` + finalRender(run)
+        : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.` + viewerBox(run)
         : `<b>Stopped before the model was clean.</b> ${esc(run.result ? run.result.reason : '')} The files below are for the last model checked.`;
     } else { o.hidden = true; }
+    wireViewer(run);
 
     const hasFiles = !live && run.files && run.files.length;
     $('results').hidden = !hasFiles;
@@ -488,9 +493,35 @@ ul.history button:hover b { text-decoration: underline; }
     $('activity').querySelectorAll('details').forEach(d => d.addEventListener('toggle', () => d.open ? openActivity.add(d.dataset.id) : openActivity.delete(d.dataset.id)));
   }
 
-  function finalRender(run) {
-    const last = run.rounds.filter(r => r.image).slice(-1)[0];
-    return last ? `<div class="final-render"><a href="${esc(last.image)}" target="_blank" rel="noreferrer"><img src="${esc(last.image)}" alt="render of the final model"></a></div>` : '';
+  // Nova's own 3D viewer and build player, embedded. One frame; tabs pick the mode and the round.
+  let view = { round: null, mode: 'viewer' };
+  function viewerBox(run) {
+    const withViewer = run.rounds.filter(r => r.viewer);
+    if (!withViewer.length) {
+      const last = run.rounds.filter(r => r.image).slice(-1)[0];
+      return last ? `<div class="final-render"><a href="${esc(last.image)}" target="_blank" rel="noreferrer"><img src="${esc(last.image)}" alt="render of the final model"></a></div>` : '';
+    }
+    const r = withViewer.find(x => x.number === view.round) || withViewer[withViewer.length - 1];
+    view.round = r.number;
+    const src = view.mode === 'player' ? r.player : r.viewer;
+    return `<div class="viewer-wrap">
+      <div class="viewer-tabs">
+        <button type="button" class="btn quiet small ${view.mode === 'viewer' ? 'on' : ''}" data-mode="viewer">3D view</button>
+        <button type="button" class="btn quiet small ${view.mode === 'player' ? 'on' : ''}" data-mode="player">Build it step by step</button>
+        <span class="small muted">${esc(r.model)} (round ${r.number})</span>
+        <a class="btn quiet small" href="${esc(src)}" target="_blank" rel="noreferrer">Open full size</a>
+      </div>
+      <iframe class="viewer-frame" src="${esc(src)}" title="Nova's 3D viewer" loading="lazy" allow="xr-spatial-tracking; fullscreen"></iframe>
+    </div>`;
+  }
+  function wireViewer(run) {
+    document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { view.mode = b.dataset.mode; render(run); });
+    document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => {
+      view.round = Number(b.dataset.view);
+      if ($('outcome').hidden) { $('outcome').hidden = false; $('outcome').className = 'outcome'; $('outcome').innerHTML = viewerBox(run); wireViewer(run); }
+      else render(run);
+      $('outcome').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    });
   }
 
   function studs(r) {

@@ -23,6 +23,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
+import urllib.parse
 from urllib.parse import parse_qs, unquote, urlparse
 
 from . import loop, nova, rebrickable
@@ -107,6 +108,16 @@ class Run:
             (self.dir / "state.json").write_text(json.dumps(self.public(), indent=1), "utf-8")
         except OSError:
             pass
+
+
+def viewer_urls(agent: nova.Client, model: nova.ProducedModel | None) -> dict:
+    """Nova's own 3D viewer and step-by-step player for a model, to embed."""
+    if model is None:
+        return {}
+    query = "model=" + urllib.parse.quote(model.url, safe="") + (
+        f"&parts={model.parts}" if model.parts is not None else "")
+    return {"viewer": f"{agent.base_url}/viewer/viewer.html?{query}",
+            "player": f"{agent.base_url}/viewer/player.html?{query}"}
 
 
 def round_dict(rnd: loop.Round) -> dict:
@@ -209,19 +220,26 @@ class Runner:
             elif event == "turn_error":
                 run.note(f"Nova reported an error: {data.get('message', '')}")
 
-        def model_images() -> dict[str, str]:
+        def produced() -> dict[str, nova.ProducedModel]:
             try:
-                return {m.file: agent.absolute(m.image_url) for m in agent.models(run.chat_id)
-                        if m.image_url}
+                return {m.file: m for m in agent.models(run.chat_id)}
             except nova.NovaError:
                 return {}
+
+        def model_images() -> dict[str, str]:
+            return {f: agent.absolute(m.image_url) for f, m in produced().items() if m.image_url}
+
+        def decorate(entry: dict, models: dict[str, nova.ProducedModel]) -> None:
+            m = models.get(entry["model"])
+            entry["image"] = entry.get("image") or (agent.absolute(m.image_url) if m and m.image_url else None)
+            entry.update(viewer_urls(agent, m))
 
         def on_round(rnd: loop.Round) -> None:
             if rnd.sent and not rnd.turn:
                 run.agent_text = ""  # a new turn is starting
                 run.emit("agent_text", {"text": ""})
             entry = round_dict(rnd)
-            entry["image"] = model_images().get(entry["model"])
+            decorate(entry, produced())
             run.rounds = [r for r in run.rounds if r["number"] != entry["number"]] + [entry]
             run.rounds.sort(key=lambda r: r["number"])
             set_status("repairing" if rnd.sent and not rnd.turn else "checking", run.phase)
@@ -242,9 +260,9 @@ class Runner:
                 "final_model": outcome.final_model.name if outcome.final_model else None,
             }
             run.status = "stopped" if run.stop_requested else "done"
-            images = model_images()  # snapshots may have finished rendering since
+            models = produced()  # snapshots may have finished rendering since
             for entry in run.rounds:
-                entry["image"] = entry.get("image") or images.get(entry["model"])
+                decorate(entry, models)
         except (nova.NovaError, PipelineError, rebrickable.RebrickableError) as err:
             run.error = str(err)
             run.status = "failed"
