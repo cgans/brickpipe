@@ -281,8 +281,15 @@ by clips, hinges and bars.
 
 ## Next steps
 
-1. Clip, hinge and bar connections in the connectivity check.
-2. Recognise bricks you already have from a photo, confirmed by you before
+1. **Turn on the price estimate.** The plan: order the first model's bricks
+   through the wanted list (any paid BrickLink order earns the one positive
+   feedback a seller account needs), upgrade the account to seller, register
+   an API consumer and a token for the home IP address, then start the page
+   with `BRICKPIPE_FEATURES=prices` and run the model again. The first live
+   run is the test; the `prices.csv` and any BrickLink error text are what to
+   look at. Once it works, drop the flag and the feature is on for everyone.
+2. Clip, hinge and bar connections in the connectivity check.
+3. Recognise bricks you already have from a photo, confirmed by you before
    they are subtracted.
 
 ## Notes for Nova
