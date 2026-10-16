@@ -32,7 +32,8 @@ from .cli import PipelineError, run_pipeline
 
 DEFAULT_PORT = 8766
 RUN_FILES = ("report.md", "feedback.md", "parts.csv", "bricklink_wanted.xml",
-             "flat.ldr", "instructions.mpd", "availability.csv", "owned.csv", "prices.csv")
+             "flat.ldr", "instructions.mpd", "availability.csv", "owned.csv", "prices.csv",
+             "connectivity.csv")
 
 DESIGN_MESSAGE_SUFFIX = (
     "\n\nWhen the model is finished, deliver it as an .mpd. It will be checked "

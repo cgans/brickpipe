@@ -239,21 +239,32 @@ def gen_features(attrs: dict) -> list[Feature]:
 
 # -- libraries ---------------------------------------------------------------
 
+def bundled_supplement() -> Path:
+    """brickpipe's own records for primitives the shadow library lacks."""
+    return Path(__file__).resolve().parent / "data" / "shadow-extra"
+
+
 class ShadowLibrary:
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, extras: list[Path] | None = None):
+        """`extras` are folders with the same layout searched after `root`;
+        the bundled supplement is always last."""
         self.root = Path(root)
         if not (self.root / "parts").is_dir():
             raise FileNotFoundError(f"Shadow library not found at {self.root} (expected a parts/ folder)")
+        self.roots = [self.root, *(extras or []), bundled_supplement()]
         self._cache: dict[str, ShadowFile | None] = {}
 
     def get(self, name: str) -> ShadowFile | None:
         key = normalise_name(name)
         if key not in self._cache:
             self._cache[key] = None
-            for folder in ("parts", "p"):
-                path = self.root / folder / key
-                if path.is_file():
-                    self._cache[key] = parse_shadow(path.read_text("utf-8", "replace"))
+            for root in self.roots:
+                for folder in ("parts", "p"):
+                    path = root / folder / key
+                    if path.is_file():
+                        self._cache[key] = parse_shadow(path.read_text("utf-8", "replace"))
+                        break
+                if self._cache[key] is not None:
                     break
         return self._cache[key]
 
@@ -365,13 +376,17 @@ class Connectors:
 
 
 def _moved(feats: list[Feature], pos: Vec, mat: Matrix) -> list[Feature]:
+    """Features carried through a reference. A scaled matrix stretches the
+    length too: primitives such as wpinhole.dat are 1 LDU long and scaled
+    along their axis by the part that uses them."""
     out = []
     for f in feats:
         p = mat_vec(mat, f.pos)
         a = mat_vec(mat, f.axis)
+        stretch = (a[0] ** 2 + a[1] ** 2 + a[2] ** 2) ** 0.5 or 1.0
         out.append(Feature(f.kind, f.gender, f.radius,
                            (p[0] + pos[0], p[1] + pos[1], p[2] + pos[2]), _unit(a),
-                           f.length, f.group))
+                           f.length * stretch, f.group))
     return out
 
 
@@ -390,6 +405,8 @@ class Report:
     connections: int
     by_kind: dict[str, int] = field(default_factory=dict)  # connections per receiving kind
     press_fit_only: list[int] = field(default_factory=list)  # in the model only thanks to overlap
+    partners: dict[int, list[tuple[int, str]]] = field(default_factory=dict)  # piece -> [(piece, kind)]
+    overlaps: dict[int, list[int]] = field(default_factory=dict)  # piece -> pieces it press-fits
 
     def summary(self, pieces: list[PlacedPart] | None = None) -> dict:
         parts = sorted({pieces[i].part for i in self.press_fit_only}) if pieces else []
@@ -501,6 +518,8 @@ def analyse(
 
     connections = 0
     by_kind: dict[str, int] = defaultdict(int)
+    partners: dict[int, list[tuple[int, str]]] = defaultdict(list)
+    overlaps: dict[int, list[int]] = defaultdict(list)
     for i, feats in enumerate(world):
         for f in feats:
             if receivers(f):
@@ -519,6 +538,8 @@ def analyse(
                                         union(i, j)
                                     connections += 1
                                     by_kind[g.kind] += 1
+                                    partners[i].append((j, g.kind))
+                                    partners[j].append((i, g.kind))
 
     before = {i: find(i) for i in range(len(pieces))}  # groups by connectors alone
 
@@ -534,6 +555,8 @@ def analyse(
                     break
                 if all(min(hi_a[k], hi_b[k]) - max(lo_a[k], lo_b[k]) > 2 for k in range(3)):
                     union(ia, ib)
+                    overlaps[ia].append(ib)
+                    overlaps[ib].append(ia)
 
     groups: dict[int, list[int]] = defaultdict(list)
     for i in range(len(pieces)):
@@ -549,7 +572,33 @@ def analyse(
         sizes[root] += 1
     biggest_before = max(sizes, key=lambda r: sizes[r]) if sizes else None
     press_fit_only = [i for i in main if before[i] != biggest_before] if main_root is not None else []
-    return Report(ordered, unknown, unverified, connections, dict(by_kind), press_fit_only)
+    return Report(ordered, unknown, unverified, connections, dict(by_kind), press_fit_only,
+                  dict(partners), dict(overlaps))
+
+
+def to_csv(report: Report, pieces: list[PlacedPart]) -> str:
+    """One row per piece: where it is, which group it landed in, what it is
+    connected to and what it merely overlaps. For working out why a piece
+    was or was not counted as attached."""
+    import csv
+    import io
+
+    group_of = {i: n for n, group in enumerate(report.groups) for i in group}
+    press = set(report.press_fit_only)
+    unknown = set(report.unknown)
+    out = io.StringIO()
+    w = csv.writer(out, lineterminator="\n")
+    w.writerow(["index", "part", "colour", "submodel", "x", "y", "z", "group", "status",
+                "connections", "connected_to", "overlaps"])
+    for i, p in enumerate(pieces):
+        status = ("no connector data" if i in unknown else "press fit only" if i in press
+                  else "attached" if group_of.get(i) == 0 else "loose")
+        links = report.partners.get(i, [])
+        w.writerow([i, p.part, p.colour, " > ".join(p.path[1:]) or "main",
+                    *(round(v, 1) for v in p.pos), group_of.get(i, ""), status, len(links),
+                    " ".join(f"{j}:{pieces[j].part}({kind})" for j, kind in links),
+                    " ".join(f"{j}:{pieces[j].part}" for j in report.overlaps.get(i, []))])
+    return out.getvalue()
 
 
 # -- finding the libraries ---------------------------------------------------

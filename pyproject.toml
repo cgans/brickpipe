@@ -18,4 +18,4 @@ brickpipe-ui = "brickpipe.web:main"
 include = ["brickpipe*"]
 
 [tool.setuptools.package-data]
-brickpipe = ["data/*.csv", "web/*.html"]
+brickpipe = ["data/*.csv", "data/shadow-extra/**/*", "web/*.html"]

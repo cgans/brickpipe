@@ -64,6 +64,8 @@ def build_report(
     ]
     if availability_note and "availability.csv" in availability_note:
         lines.append("- `availability.csv`: every part and colour with its status")
+    if connectivity_note and "connection(s) found" in connectivity_note:
+        lines.append("- `connectivity.csv`: every piece, its group, and what it is connected to")
     if owned_note:
         lines.append("- `owned.csv`: each lot with how many you have and how many to buy")
     if price_note:
@@ -283,6 +285,8 @@ def run_pipeline(
 
     xml, skipped = bom.to_bricklink_xml(rows_to_buy, colours, overrides)
     (out / "parts.csv").write_text(bom.to_csv(rows, colours, catalog), encoding="utf-8")
+    if conn_report is not None:
+        (out / "connectivity.csv").write_text(connectivity.to_csv(conn_report, pieces), encoding="utf-8")
     (out / "bricklink_wanted.xml").write_text(xml, encoding="utf-8")
     (out / "flat.ldr").write_text(bom.to_flat_ldr(pieces, name), encoding="utf-8")
     (out / "instructions.mpd").write_text(ldraw.dump(doc), encoding="utf-8")
