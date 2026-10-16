@@ -92,6 +92,7 @@ class Result:
     feedback: str | None  # the repair request text, or None when clean
     owned: dict | None = None  # need/have/buy totals when an inventory was given
     price: dict | None = None  # the cost estimate's totals when BrickLink was asked
+    connectivity: dict | None = None  # what the connectivity check found
 
     @property
     def errors(self) -> int:
@@ -165,8 +166,10 @@ def run_pipeline(
     if catalog:
         findings += checks.check_parts(pieces, catalog)
         findings += checks.check_floating(pieces, catalog)
+    conn_report = None
     if connectors:
-        findings += checks.check_connectivity(pieces, connectors, catalog)
+        conn_report = checks.connectivity_report(pieces, connectors, catalog)
+        findings += checks.check_connectivity(pieces, connectors, catalog, conn_report)
         connectors.parts.close()
 
     stepped = (
@@ -182,7 +185,7 @@ def run_pipeline(
             "Connectivity was checked: every piece is joined to the model by a stud, "
             "pin, axle, bar, clip or hinge." if not n_conn else
             "Connectivity was checked; see the connectivity findings below."
-        )
+        ) + " " + checks.connectivity_summary(conn_report) + "."
     if not connectors:
         missing = []
         if not shadow_path:
@@ -298,7 +301,8 @@ def run_pipeline(
     if catalog:
         catalog.close()
 
-    return Result(name, out, len(pieces), len(rows), findings, request, owned_summary, price_summary)
+    return Result(name, out, len(pieces), len(rows), findings, request, owned_summary, price_summary,
+                  conn_report.summary() if conn_report else None)
 
 
 def rebrickable_login(client: rebrickable.Client | None) -> int:

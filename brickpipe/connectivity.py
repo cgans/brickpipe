@@ -388,6 +388,13 @@ class Report:
     unknown: list[int]  # pieces with no connector data at all
     unverified: list[int]  # loose, but carry connector kinds this check cannot match
     connections: int
+    by_kind: dict[str, int] = field(default_factory=dict)  # connections per receiving kind
+    press_fit_only: list[int] = field(default_factory=list)  # in the model only thanks to overlap
+
+    def summary(self) -> dict:
+        return {"connections": self.connections, "by_kind": dict(self.by_kind),
+                "press_fit_only": len(self.press_fit_only), "groups": len(self.groups),
+                "unknown": len(self.unknown)}
 
 
 def _parallel(a: Vec, b: Vec) -> bool:
@@ -492,6 +499,7 @@ def analyse(
                     index[key].append((i, f))
 
     connections = 0
+    by_kind: dict[str, int] = defaultdict(int)
     for i, feats in enumerate(world):
         for f in feats:
             if receivers(f):
@@ -509,6 +517,9 @@ def analyse(
                                     if find(i) != find(j):
                                         union(i, j)
                                     connections += 1
+                                    by_kind[g.kind] += 1
+
+    before = {i: find(i) for i in range(len(pieces))}  # groups by connectors alone
 
     # Press fit: geometry that overlaps another piece's by more than a sliver.
     if boxes:
@@ -529,7 +540,15 @@ def analyse(
     ordered = sorted(groups.values(), key=len, reverse=True)
     main = set(ordered[0]) if ordered else set()
     unverified = [i for i in has_other if i not in main]
-    return Report(ordered, unknown, unverified, connections)
+    # Pieces in the model only because their geometry overlaps something: the
+    # connector-only grouping had them outside the main group's root.
+    main_root = find(ordered[0][0]) if ordered else None
+    sizes: dict[int, int] = defaultdict(int)
+    for root in before.values():
+        sizes[root] += 1
+    biggest_before = max(sizes, key=lambda r: sizes[r]) if sizes else None
+    press_fit_only = [i for i in main if before[i] != biggest_before] if main_root is not None else []
+    return Report(ordered, unknown, unverified, connections, dict(by_kind), press_fit_only)
 
 
 # -- finding the libraries ---------------------------------------------------
