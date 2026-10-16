@@ -351,9 +351,9 @@ ul.history button:hover b { text-decoration: underline; }
       </div>
     </div>
 
-    <div class="panel stack">
+    <div class="panel stack" id="pricesPanel" hidden>
       <h2>Prices (BrickLink)</h2>
-      <p class="small muted">With these, each run ends with what the wanted list would cost, and lots nobody sells or that are pricey go back to the agent as things to swap. Register at <a href="https://www.bricklink.com/v2/api/register_consumer.page" target="_blank" rel="noopener">bricklink.com/v2/api/register_consumer.page</a>: the consumer key and secret identify brickpipe, and the access token is issued for your computer's current public IP address.</p>
+      <p class="small muted">Experimental. With these, each run ends with what the wanted list would cost, and lots nobody sells or that are pricey go back to the agent as things to swap. BrickLink only issues API keys to seller accounts: becoming one needs a single positive feedback, so buy something from any BrickLink store first, then register at <a href="https://www.bricklink.com/v2/api/register_consumer.page" target="_blank" rel="noopener">bricklink.com/v2/api/register_consumer.page</a>. The consumer key and secret identify brickpipe; the access token is issued for your computer's current public IP address.</p>
       <div class="row">
         <div class="grow"><label for="blConsumerKey">Consumer key</label><input id="blConsumerKey" type="text" autocomplete="off"></div>
         <div class="grow"><label for="blConsumerSecret">Consumer secret</label><input id="blConsumerSecret" type="password" autocomplete="off"></div>
@@ -441,7 +441,7 @@ ul.history button:hover b { text-decoration: underline; }
     const missing = [];
     if (!$('rebrickableKey').value.trim()) missing.push('no Rebrickable key, so colours are not checked against real parts');
     if (!$('ldrawDir').value.trim()) missing.push('no LDraw library, so stud connections are not checked');
-    if (!blComplete()) missing.push(Object.values(blCreds()).some(Boolean) ? 'BrickLink needs all four values, so no price estimate' : 'no BrickLink keys, so no price estimate');
+    if (flags.prices && !blComplete()) missing.push(Object.values(blCreds()).some(Boolean) ? 'BrickLink needs all four values, so no price estimate' : 'no BrickLink keys, so no price estimate');
     $('settingsHint').hidden = !missing.length;
     $('settingsHint').innerHTML = missing.length ? esc(missing.join('; ')) + '. <button type="button" id="hintSettings">Open Settings</button>' : '';
     const b = $('hintSettings'); if (b) b.onclick = () => showView('settings');
@@ -451,6 +451,8 @@ ul.history button:hover b { text-decoration: underline; }
   async function loadSettings() {
     const s = await api('/api/settings');
     $('version').textContent = s.version ? 'v' + s.version : '';
+    flags = s.features || {};
+    $('pricesPanel').hidden = !flags.prices;
     $('novaUrl').value = store.get('nova_url', '') || s.nova_url;
     $('novaDb').value = store.get('nova_db', '') || s.nova_db;
     $('ldrawDir').value = store.get('ldraw_dir', '') || s.ldraw_dir || '';
@@ -462,6 +464,7 @@ ul.history button:hover b { text-decoration: underline; }
     rbRender();
     settingsHint();
   }
+  let flags = {};
   const priceFields = [['blConsumerKey', 'bl_consumer_key'], ['blConsumerSecret', 'bl_consumer_secret'], ['blToken', 'bl_token'], ['blTokenSecret', 'bl_token_secret'],
     ['priceRegion', 'price_region'], ['priceCurrency', 'price_currency'], ['priceCondition', 'price_condition'], ['priceGuide', 'price_guide']];
   const blCreds = () => ({ consumer_key: $('blConsumerKey').value.trim(), consumer_secret: $('blConsumerSecret').value.trim(),
@@ -570,7 +573,7 @@ ul.history button:hover b { text-decoration: underline; }
       nova_url: $('novaUrl').value.trim(), nova_db: $('novaDb').value.trim(), ldraw_dir: $('ldrawDir').value.trim(),
       rounds: Number($('rounds').value) || 3, rebrickable_key: $('rebrickableKey').value.trim(),
       owned_text: $('ownedText').value.trim(), rebrickable_user_token: store.get('rebrickable_user_token', ''),
-      bricklink: blComplete() ? blCreds() : null, price_region: $('priceRegion').value, price_currency: $('priceCurrency').value.trim().toUpperCase(),
+      bricklink: flags.prices && blComplete() ? blCreds() : null, price_region: $('priceRegion').value, price_currency: $('priceCurrency').value.trim().toUpperCase(),
       price_condition: $('priceCondition').value, price_guide: $('priceGuide').value,
     };
     if ($('existing').open) {

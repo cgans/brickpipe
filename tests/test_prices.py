@@ -155,13 +155,28 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(result.price["region"], "eu")
         self.assertGreater(Decimal(result.price["total"]), 0)
 
-    def test_cli_prices_needs_the_variables(self):
+    def test_cli_prices_is_behind_a_flag_and_needs_the_variables(self):
+        import io
         import os
+        from contextlib import redirect_stderr
         for var in bricklink.ENV.values():
             os.environ.pop(var, None)
+        os.environ.pop("BRICKPIPE_FEATURES", None)
         with tempfile.TemporaryDirectory() as tmp:
-            code = cli.main([str(EXAMPLE), "-o", tmp, "--prices"])
-        self.assertEqual(code, 2)
+            err = io.StringIO()
+            with redirect_stderr(err):
+                code = cli.main([str(EXAMPLE), "-o", tmp, "--prices"])
+            self.assertEqual(code, 2)
+            self.assertIn("feature flag", err.getvalue())
+            os.environ["BRICKPIPE_FEATURES"] = "prices"
+            try:
+                err = io.StringIO()
+                with redirect_stderr(err):
+                    code = cli.main([str(EXAMPLE), "-o", tmp, "--prices"])
+            finally:
+                os.environ.pop("BRICKPIPE_FEATURES", None)
+            self.assertEqual(code, 2)
+            self.assertIn("BRICKLINK_CONSUMER_KEY", err.getvalue())
 
 
 if __name__ == "__main__":

@@ -56,9 +56,12 @@ Import-Csv out\availability.csv | Format-Table
 It takes under ten seconds. Every row should have a status. The key lasts
 until you close the window; nothing is written to disk.
 
-## 3b. Live-test the price estimate
+## 3b. Live-test the price estimate (behind a flag)
 
-Log in to BrickLink and open
+BrickLink only gives API keys to seller accounts, and the "Upgrade to a
+Seller" page asks for one positive feedback first. So: place any small
+order from a BrickLink store, pay, and wait for the seller's feedback; then
+upgrade, log in and open
 <https://www.bricklink.com/v2/api/register_consumer.page>. Register a
 consumer (any name; it gives a consumer key and secret), then add an access
 token for your computer's public IP address, which this prints:
@@ -72,14 +75,17 @@ Then, in the same window as the Rebrickable key:
 ```powershell
 $env:BRICKLINK_CONSUMER_KEY = "..."; $env:BRICKLINK_CONSUMER_SECRET = "..."
 $env:BRICKLINK_TOKEN = "..."; $env:BRICKLINK_TOKEN_SECRET = "..."
+$env:BRICKPIPE_FEATURES = "prices"
 py -3 -m brickpipe examples\garden-shed.mpd -o out --availability --prices --price-region north_america --price-currency USD
 Import-Csv out\prices.csv | Format-Table
 ```
 
 The report ends with the estimated cost. If BrickLink says the token is not
 valid for this address, your public IP has changed since you added the token;
-add another on the same page. On the page, the same four values go under
-Settings, Prices (BrickLink).
+add another on the same page. On the page, start it with
+`$env:BRICKPIPE_FEATURES = "prices"` set in the same window (or add that
+line to `brickpipe-ui.cmd` as `set BRICKPIPE_FEATURES=prices`) and the same
+four values go under Settings, Prices (BrickLink).
 
 ## 4. Install LDraw Nova
 
