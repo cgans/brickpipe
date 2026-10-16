@@ -740,7 +740,7 @@ ul.history button:hover b { text-decoration: underline; }
   function ownedLine(run) {
     const o = run.result && run.result.owned;
     if (!o) return '';
-    return `<p style="margin-top:8px">You already have <b>${o.have}</b> of the ${o.need} pieces (${o.lots_covered} of ${o.lots_total} lots complete); the wanted list holds the <b>${o.buy}</b> still to buy.${o.unused ? ` <span class="muted">${o.unused} of the bricks you listed (${o.unused_lots} line${o.unused_lots === 1 ? '' : 's'}) are not used in this model at all — check the part number and colour; they are the rows with need 0 in owned.csv.</span>` : ''}</p>`;
+    return `<p style="margin-top:8px">You already have <b>${o.have}</b> of the ${o.need} pieces (${o.lots_covered} of ${o.lots_total} lots complete); the wanted list holds the <b>${o.buy}</b> still to buy.${o.unused ? ` <span class="muted">${o.unused_lots} line${o.unused_lots === 1 ? '' : 's'} you typed (${o.unused} brick${o.unused === 1 ? '' : 's'}) matched nothing in this model — check the part number and colour; they are the rows with need 0 in owned.csv.</span>` : ''}${o.spare ? ` <span class="muted">${o.spare} brick${o.spare === 1 ? '' : 's'} from what you typed are left over after covering the model.</span>` : ''}</p>`;
   }
   function wireViewer(run) {
     document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { view.mode = b.dataset.mode; render(run); });

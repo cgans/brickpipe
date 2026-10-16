@@ -244,7 +244,7 @@ def run_pipeline(
         leftover: dict = {}
         covered = inventory.subtract(rows, owned, aliases, leftover=leftover)
         rows_to_buy = inventory.remaining_rows(covered)
-        owned_summary = inventory.summary(covered, leftover)
+        owned_summary = inventory.summary(covered, leftover, owned)
         (out / "owned.csv").write_text(inventory.to_csv(covered, colours, leftover), encoding="utf-8")
         for problem in owned.problems[:10]:
             findings.append(checks.Finding("warning", "owned", f"Inventory: {problem}"))
@@ -256,9 +256,14 @@ def run_pipeline(
         )
         if owned_summary["unused"]:
             owned_note += (
-                f" {owned_summary['unused']} of the bricks you listed "
-                f"({owned_summary['unused_lots']} line(s)) are not used in this model at all; "
-                "check the part number and colour. They are the rows with need 0 in `owned.csv`."
+                f" {owned_summary['unused_lots']} line(s) you typed, {owned_summary['unused']} brick(s), "
+                "matched nothing in this model; check the part number and colour. "
+                "They are the rows with need 0 in `owned.csv`."
+            )
+        if owned_summary["spare"]:
+            owned_note += (
+                f" {owned_summary['spare']} brick(s) from {owned_summary['spare_lots']} typed line(s) "
+                "are left over after covering what the model needs."
             )
         if owned.source == "rebrickable" and not aliases:
             owned_note += (" Rebrickable parts could only be matched by id; run with "

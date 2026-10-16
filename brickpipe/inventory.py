@@ -181,11 +181,18 @@ def remaining_rows(covered: list[Covered]) -> list[BomRow]:
     return [BomRow(c.row.part, c.row.colour, c.buy) for c in covered if c.buy > 0]
 
 
-def summary(covered: list[Covered], leftover: dict[tuple[str, int], int] | None = None) -> dict:
+def summary(covered: list[Covered], leftover: dict[tuple[str, int], int] | None = None,
+            inventory: Inventory | None = None) -> dict:
+    """Totals, plus two kinds of leftover from typed lines: `unused` lines
+    matched nothing in the model (probably a wrong part or colour), `spare`
+    lines were partly used and have bricks to spare."""
     need = sum(c.row.quantity for c in covered)
     have = sum(c.have for c in covered)
+    listed = inventory.by_ldraw if inventory is not None else {}
+    unused = {k: v for k, v in (leftover or {}).items() if listed.get(k, v) == v}
+    spare = {k: v for k, v in (leftover or {}).items() if k not in unused}
     return {"need": need, "have": have, "buy": need - have,
             "lots_covered": sum(1 for c in covered if c.buy == 0),
             "lots_total": len(covered),
-            "unused": sum((leftover or {}).values()),
-            "unused_lots": len(leftover or {})}
+            "unused": sum(unused.values()), "unused_lots": len(unused),
+            "spare": sum(spare.values()), "spare_lots": len(spare)}
