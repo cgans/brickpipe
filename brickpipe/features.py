@@ -12,6 +12,12 @@ import os
 ENV = "BRICKPIPE_FEATURES"
 
 # name -> why it is off by default
+#
+# prices: to be flipped on once a BrickLink seller account exists (one paid
+# order from any BrickLink store earns the feedback it needs) and an API
+# consumer plus a token for the home IP address have been registered. The
+# first live run against the real API is the acceptance test; when it passes,
+# remove the entry below and the feature is on for everyone.
 FLAGGED = {
     "prices": "BrickLink only issues API keys to seller accounts, and the live "
               "call has not been exercised yet",
