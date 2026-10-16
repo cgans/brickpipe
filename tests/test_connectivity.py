@@ -37,9 +37,16 @@ PARTS = {
     "3938.dat": "0 Hinge Brick 1 x 2 Top\n",
     "3815.dat": "0 Minifig Hips\n",
     "3814.dat": "0 Minifig Torso\n",
+    # plate with a wheel pin sticking out sideways (+X) from x=10, y=4
+    "4600t.dat": "0 Plate with Wheel Pin\n" + STUD.format(x=0, z=0) + "\n"
+                 "1 16 10 4 0 0 -1 0 1 0 0 0 0 1 wpin.dat",
+    # rim: a notched hole, the 1 LDU primitive stretched to 12 along its axis (here X)
+    "6014t.dat": "0 Wheel Rim\n1 16 -6 0 0 0 -12 0 1 0 0 0 0 1 wpinhole.dat",
 }
 PRIMS = {
     "stud.dat": "0 Stud\n",
+    "wpin.dat": "0 Wheel Holding Pin\n",
+    "wpinhole.dat": "0 Wheel Hole Notched Through\n",
     "stud-one.dat": "0 Stud group\n1 16 0 0 0 1 0 0 0 1 0 0 0 1 stud.dat",
 }
 SHADOW_PARTS = {
@@ -63,6 +70,8 @@ SHADOW_PARTS = {
 }
 SHADOW_PRIMS = {
     "stud.dat": "0 !LDCAD SNAP_CYL [ID=studC] [gender=M] [caps=one] [secs=R 6 4]",
+    "wpin.dat": "0 !LDCAD SNAP_CYL [gender=M] [caps=one] [secs=R 4 11   _L 4.25 1]",
+    "wpinhole.dat": "0 !LDCAD SNAP_CYL [id=wpAxHole] [group=wpAxHole] [gender=F] [caps=none] [secs=R 4 1] [slide=true] [scale=YOnly]",
 }
 
 
@@ -265,6 +274,25 @@ class AnalyseTests(unittest.TestCase):
         self.assertIn("2 piece(s) are held only by a press fit", checks.connectivity_summary(rep))
         self.assertIn("1x 30374, 1x 48729a", checks.connectivity_summary(rep, pieces))
         self.assertEqual(rep.summary(pieces)["press_fit_parts"], ["30374", "48729a"])
+
+    def test_scaled_primitive_keeps_its_stretched_length(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = connectors(Path(tmp))
+            feats, _ = conn.features("6014t")
+        hole = [f for f in feats if f.gender == "F"][0]
+        self.assertAlmostEqual(hole.length, 12.0)
+        self.assertAlmostEqual(abs(hole.axis[0]), 1.0)
+
+    def test_wheel_rim_on_its_pin_connects(self):
+        # Pin runs from x=10 to x=21 at y=4; rim's hole spans x=-6..6 around its own origin,
+        # so a rim placed at x=16 has its hole over the pin from x=10..22.
+        _, rep = self.analyse(
+            "0 FILE a.ldr\n1 4 0 0 0 1 0 0 0 1 0 0 0 1 4600t.dat\n"
+            "1 0 16 4 0 1 0 0 0 1 0 0 0 1 6014t.dat\n"
+        )
+        self.assertEqual(len(rep.groups), 1)
+        self.assertEqual(rep.by_kind.get("cyl"), 1)
+        self.assertEqual(rep.press_fit_only, [])
 
     def test_floating_brick_is_its_own_group(self):
         _, rep = self.analyse(

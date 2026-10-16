@@ -365,13 +365,17 @@ class Connectors:
 
 
 def _moved(feats: list[Feature], pos: Vec, mat: Matrix) -> list[Feature]:
+    """Features carried through a reference. A scaled matrix stretches the
+    length too: primitives such as wpinhole.dat are 1 LDU long and scaled
+    along their axis by the part that uses them."""
     out = []
     for f in feats:
         p = mat_vec(mat, f.pos)
         a = mat_vec(mat, f.axis)
+        stretch = (a[0] ** 2 + a[1] ** 2 + a[2] ** 2) ** 0.5 or 1.0
         out.append(Feature(f.kind, f.gender, f.radius,
                            (p[0] + pos[0], p[1] + pos[1], p[2] + pos[2]), _unit(a),
-                           f.length, f.group))
+                           f.length * stretch, f.group))
     return out
 
 
