@@ -87,7 +87,7 @@ class Run:
             "chat_id": self.chat_id, "chat_url": self.chat_url, "rounds": self.rounds,
             "result": self.result, "error": self.error, "started_at": self.started_at,
             "finished_at": self.finished_at, "log": self.log[-300:], "request": req,
-            "agent_text": self.agent_text[-4000:], "events_seen": self.events_seen,
+            "agent_text": self.agent_text[-8000:], "events_seen": self.events_seen,
             "activity": self.activity[-60:],
             "files": sorted(p.name for p in self.final_dir().iterdir()) if self.final_dir() else [],
         }
@@ -187,10 +187,19 @@ class Runner:
             run.emit("status", {"status": status, "phase": phase})
 
         last_text_emit = [0.0]
+        text_pending = [False]
+
+        def flush_text() -> None:
+            if text_pending[0]:
+                text_pending[0] = False
+                last_text_emit[0] = time.monotonic()
+                run.emit("agent_text", {"text": run.agent_text[-8000:]})
         last_output_emit: dict = {}
 
         def on_event(event: str, data: dict) -> None:
             run.events_seen += 1
+            if event != "text":
+                flush_text()  # the agent stopped talking; show the last fragment
             if event == "progress" and data.get("summary"):
                 run.phase = str(data["summary"])[:200]
                 run.note(f"Nova: {run.phase}")
@@ -227,10 +236,9 @@ class Runner:
                     run.emit("activity", entry)
             elif event == "text" and data.get("delta"):
                 run.agent_text = (run.agent_text + str(data["delta"]))[-8000:]
-                now = time.monotonic()
-                if now - last_text_emit[0] > 0.4 or "\n" in data["delta"]:
-                    last_text_emit[0] = now
-                    run.emit("agent_text", {"text": run.agent_text[-4000:]})
+                text_pending[0] = True
+                if time.monotonic() - last_text_emit[0] > 0.4 or "\n" in data["delta"]:
+                    flush_text()
             elif event == "model":
                 run.note(f"Nova published model: {data.get('name', '')}")
             elif event == "turn_error":

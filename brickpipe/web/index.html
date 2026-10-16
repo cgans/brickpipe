@@ -104,7 +104,9 @@ details > summary { cursor: pointer; font-weight: 700; margin-bottom: 10px; }
 .statusline .status { margin: 0; }
 .statusline .phase { margin: 0; flex: 1 1 200px; }
 .agent { margin-top: 12px; padding: 12px 14px; border-radius: 8px; background: var(--panel-2); border-left: 4px solid var(--stud); }
-.agent-text { white-space: pre-wrap; max-height: 200px; overflow: auto; font-size: .95rem; }
+.agent-head { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+.agent-text { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 340px; overflow: auto; resize: vertical; font-size: .95rem; margin-top: 6px; }
+.agent-text.all { max-height: none; resize: none; }
 .agent-text:empty::before { content: "Waiting for the agent to say something…"; color: var(--ink-2); }
 .activity { list-style: none; padding: 0; margin: 10px 0 0; }
 .activity li { border-top: 1px solid var(--line); padding: 6px 0; }
@@ -285,7 +287,7 @@ ul.history button:hover b { text-decoration: underline; }
         <p class="phase muted" id="phaseText"></p>
       </div>
       <div class="agent" id="agentBox" hidden>
-        <b>The agent, live</b>
+        <div class="agent-head"><b>The agent, live</b><button class="btn quiet small" id="agentAll" type="button" hidden>Show all</button></div>
         <div class="agent-text" id="agentText"></div>
         <ul class="activity" id="activity"></ul>
       </div>
@@ -695,8 +697,15 @@ ul.history button:hover b { text-decoration: underline; }
     const box = $('agentText');
     const stick = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
     box.textContent = run.agent_text || '';
-    if (stick) box.scrollTop = box.scrollHeight;
+    if (stick && !box.classList.contains('all')) box.scrollTop = box.scrollHeight;
+    $('agentAll').hidden = box.scrollHeight <= box.clientHeight && !box.classList.contains('all');
   }
+  $('agentAll').onclick = () => {
+    const box = $('agentText');
+    const all = box.classList.toggle('all');
+    $('agentAll').textContent = all ? 'Show less' : 'Show all';
+    if (!all) box.scrollTop = box.scrollHeight;
+  };
 
   const openActivity = new Set();
   function renderActivity(run) {
