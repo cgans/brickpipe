@@ -179,9 +179,9 @@ def run_pipeline(
     if connectors:
         n_conn = sum(1 for f in findings if f.check == "connectivity")
         connectivity_note = (
-            "Stud connectivity was checked: every piece is joined to the model by a "
-            "stud, pin or axle." if not n_conn else
-            "Stud connectivity was checked; see the connectivity findings below."
+            "Connectivity was checked: every piece is joined to the model by a stud, "
+            "pin, axle, bar, clip or hinge." if not n_conn else
+            "Connectivity was checked; see the connectivity findings below."
         )
     if not connectors:
         missing = []
@@ -382,7 +382,7 @@ def main(argv: list[str] | None = None, client: rebrickable.Client | None = None
         "--ldraw-dir", type=Path, default=None,
         help="the LDraw part library: a folder with parts/ and p/, or LPub3D's "
         "complete.zip (found automatically in the usual places). With --nova-db, "
-        "enables the stud connectivity check.",
+        "enables the connectivity check.",
     )
     parser.add_argument(
         "--get-ldraw", action="store_true",

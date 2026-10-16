@@ -11,15 +11,24 @@ Two sources of truth:
   carry the male stud; parts carry their undersides as female records with
   grids.
 
-A connection is a male and a female cylinder connector of the same radius at
-the same point in space, on different pieces, with parallel axes. Pieces are
-joined into groups by their connections; the biggest group is the model.
+Every connector is a segment: a point, an axis and a length (a stud is 4 LDU
+long, a Technic pin 40, a bar whatever the part says). Two connectors mate
+when they are on different pieces, their axes are parallel and on the same
+line (within 1.5 LDU), their extents overlap, and their kinds fit:
 
-Only `SNAP_CYL` is matched (studs, pins, axles, bars in holes). Clips, hinges,
-fingers and generic connectors (`SNAP_CLP`, `SNAP_FGR`, `SNAP_GEN`) are noted
-but not matched, so a piece held only by one of those is reported as
-unverified, not as loose. Pieces whose geometry overlaps another piece's
-(a tyre on a rim) are treated as press-fitted.
+* `SNAP_CYL` male into `SNAP_CYL` female of the same radius: studs into
+  sockets, pins and axles into holes, bars into holders. Overlap along the
+  line is what matters, so a pin half-way through a hole, or a bar held
+  anywhere along its length, counts.
+* `SNAP_CYL` male bar into `SNAP_CLP` clip of the same radius.
+* `SNAP_FGR` hinge fingers into fingers of the same group and the opposite
+  gender offset.
+* `SNAP_GEN` male into female of the same group at the same point (minifig
+  hands into torsos, horses onto bases and the like).
+
+Pieces are joined into groups by their connections; the biggest group is the
+model. Pieces whose geometry overlaps another piece's (a tyre on a rim) are
+treated as press-fitted.
 """
 from __future__ import annotations
 
@@ -37,19 +46,24 @@ MAX_DEPTH = 12
 
 @dataclass(frozen=True)
 class Feature:
-    kind: str  # "cyl" or "other"
-    gender: str  # "M" or "F"
+    kind: str  # "cyl", "clip", "fgr" or "gen"
+    gender: str  # "M" or "F" (a clip is "F"; fingers carry their genderOfs)
     radius: float
-    pos: Vec
-    axis: Vec
+    pos: Vec  # start of the segment
+    axis: Vec  # unit direction the segment runs in
+    length: float = 0.0
+    group: str = ""
 
 
 @dataclass
 class ShadowFile:
     cyls: list[dict] = field(default_factory=list)
+    clips: list[dict] = field(default_factory=list)
+    fingers: list[dict] = field(default_factory=list)
+    gens: list[dict] = field(default_factory=list)
     includes: list[tuple[str, Vec, Matrix]] = field(default_factory=list)
     clear: bool = False  # SNAP_CLEAR: ignore connectors of referenced primitives
-    other: int = 0  # count of non-cylinder connector records
+    other: int = 0  # connector records of kinds this module does not understand
 
 
 # -- shadow records -----------------------------------------------------------
@@ -72,6 +86,12 @@ def parse_shadow(text: str) -> ShadowFile:
             out.includes.append((attrs["ref"], _vec(attrs.get("pos")), _mat(attrs.get("ori"))))
         elif kind == "SNAP_CYL":
             out.cyls.append(attrs)
+        elif kind == "SNAP_CLP":
+            out.clips.append(attrs)
+        elif kind == "SNAP_FGR":
+            out.fingers.append(attrs)
+        elif kind == "SNAP_GEN":
+            out.gens.append(attrs)
         else:
             out.other += 1
     return out
@@ -121,31 +141,100 @@ def _grid(text: str | None) -> list[tuple[float, float]]:
     return [(x, z) for x in xs for z in zs]
 
 
+def _unit(v: Vec) -> Vec:
+    n = (v[0] ** 2 + v[1] ** 2 + v[2] ** 2) ** 0.5 or 1.0
+    return (v[0] / n, v[1] / n, v[2] / n)
+
+
+def _sections(secs: str) -> tuple[float | None, float]:
+    """(radius, total length) of a [secs=...] list such as "R 6 16 R 8 4".
+
+    Each section is a shape letter, a radius and a length. The radius reported
+    is the one covering the most length, so a pin with 2 LDU chamfers of 6.25
+    still reads as a radius-6 pin."""
+    tokens = secs.split()
+    by_radius: dict[float, float] = defaultdict(float)
+    i = 0
+    while i < len(tokens):
+        try:
+            float(tokens[i])
+            i += 1  # a stray number where a shape letter was expected
+            continue
+        except ValueError:
+            pass
+        try:
+            radius, length = float(tokens[i + 1]), float(tokens[i + 2])
+        except (IndexError, ValueError):
+            break
+        by_radius[radius] += length
+        i += 3
+    if not by_radius:
+        return None, 0.0
+    radius = max(by_radius, key=lambda r: by_radius[r])
+    return radius, sum(by_radius.values())
+
+
+def _segment(attrs: dict, length: float) -> tuple[Vec, Vec]:
+    """Start point and unit axis of a connector that runs along its own -Y
+    (LDraw "up") from pos for `length`, or is centred on pos with
+    [center=true]."""
+    pos = _vec(attrs.get("pos"))
+    ori = _mat(attrs.get("ori"))
+    axis = _unit(mat_vec(ori, (0.0, -1.0, 0.0)))
+    if attrs.get("center", "").lower() == "true":
+        pos = tuple(pos[k] - axis[k] * length / 2 for k in range(3))  # type: ignore[assignment]
+    return pos, axis
+
+
 def cyl_features(attrs: dict) -> list[Feature]:
     gender = attrs.get("gender", "").upper()
     if gender not in ("M", "F"):
         return []
-    secs = attrs.get("secs", "").split()
-    radius = None
-    for tok in secs:
-        try:
-            radius = float(tok)
-            break
-        except ValueError:
-            continue
+    radius, length = _sections(attrs.get("secs", ""))
     if radius is None:
         return []
-    pos = _vec(attrs.get("pos"))
+    pos, axis = _segment(attrs, length)
     ori = _mat(attrs.get("ori"))
-    axis = mat_vec(ori, (0.0, 1.0, 0.0))  # a cylinder runs along its own Y
-    return [
-        Feature("cyl", gender, radius,
-                (pos[0] + mat_vec(ori, (gx, 0.0, gz))[0],
-                 pos[1] + mat_vec(ori, (gx, 0.0, gz))[1],
-                 pos[2] + mat_vec(ori, (gx, 0.0, gz))[2]),
-                axis)
-        for gx, gz in _grid(attrs.get("grid"))
-    ]
+    out = []
+    for gx, gz in _grid(attrs.get("grid")):
+        off = mat_vec(ori, (gx, 0.0, gz))
+        out.append(Feature("cyl", gender, radius,
+                           (pos[0] + off[0], pos[1] + off[1], pos[2] + off[2]), axis, length))
+    return out
+
+
+def clip_features(attrs: dict) -> list[Feature]:
+    try:
+        radius = float(attrs.get("radius", "4"))
+        length = float(attrs.get("length", "8"))
+    except ValueError:
+        return []
+    pos, axis = _segment(attrs, length)
+    return [Feature("clip", "F", radius, pos, axis, length, attrs.get("group", ""))]
+
+
+def finger_features(attrs: dict) -> list[Feature]:
+    """A hinge's row of fingers, centred on pos, running along -Y of ori.
+    Gender is the genderOfs: which part owns the first finger."""
+    gender = attrs.get("genderofs", "M").upper()
+    try:
+        widths = [float(t) for t in attrs.get("seq", "").split()]
+        radius = float(attrs.get("radius", "4"))
+    except ValueError:
+        return []
+    length = sum(widths) or 8.0
+    centred = dict(attrs)
+    centred.setdefault("center", "true")
+    pos, axis = _segment(centred, length)
+    return [Feature("fgr", gender, radius, pos, axis, length, attrs.get("group", ""))]
+
+
+def gen_features(attrs: dict) -> list[Feature]:
+    gender = attrs.get("gender", "").upper()
+    if gender not in ("M", "F"):
+        return []
+    pos, axis = _segment(attrs, 0.0)
+    return [Feature("gen", gender, 0.0, pos, axis, 0.0, attrs.get("group", ""))]
 
 
 # -- libraries ---------------------------------------------------------------
@@ -250,6 +339,12 @@ class Connectors:
         if shadow:
             for attrs in shadow.cyls:
                 feats.extend(cyl_features(attrs))
+            for attrs in shadow.clips:
+                feats.extend(clip_features(attrs))
+            for attrs in shadow.fingers:
+                feats.extend(finger_features(attrs))
+            for attrs in shadow.gens:
+                feats.extend(gen_features(attrs))
             other += shadow.other
             for ref, pos, ori in shadow.includes:
                 inc = self._collect(ref, depth + 1) if depth < MAX_DEPTH else None
@@ -275,7 +370,8 @@ def _moved(feats: list[Feature], pos: Vec, mat: Matrix) -> list[Feature]:
         p = mat_vec(mat, f.pos)
         a = mat_vec(mat, f.axis)
         out.append(Feature(f.kind, f.gender, f.radius,
-                           (p[0] + pos[0], p[1] + pos[1], p[2] + pos[2]), a))
+                           (p[0] + pos[0], p[1] + pos[1], p[2] + pos[2]), _unit(a),
+                           f.length, f.group))
     return out
 
 
@@ -290,7 +386,7 @@ class Group:
 class Report:
     groups: list[list[int]]  # largest first, indices into pieces
     unknown: list[int]  # pieces with no connector data at all
-    unverified: list[int]  # loose by cylinders, but have clip/hinge/other connectors
+    unverified: list[int]  # loose, but carry connector kinds this check cannot match
     connections: int
 
 
@@ -299,6 +395,57 @@ def _parallel(a: Vec, b: Vec) -> bool:
     la = (a[0] ** 2 + a[1] ** 2 + a[2] ** 2) ** 0.5 or 1.0
     lb = (b[0] ** 2 + b[1] ** 2 + b[2] ** 2) ** 0.5 or 1.0
     return abs(dot / (la * lb)) > 0.95
+
+
+MIN_OVERLAP = 2.0  # LDU of shared length before two segments count as mated
+GEN_TOLERANCE = 4.0  # generic connectors are blobs, not points
+
+
+def _receives(f: Feature, g: Feature) -> bool:
+    """Can male-ish `f` mate with female-ish `g`? Kinds and sizes only."""
+    if f.kind == "cyl" and f.gender == "M":
+        if g.kind == "cyl" and g.gender == "F":
+            return abs(f.radius - g.radius) <= 0.01
+        if g.kind == "clip":
+            return abs(f.radius - g.radius) <= 0.5
+        return False
+    if f.kind == "fgr" and g.kind == "fgr":
+        return f.gender != g.gender and f.group == g.group and abs(f.radius - g.radius) <= 0.5
+    if f.kind == "gen" and f.gender == "M" and g.kind == "gen" and g.gender == "F":
+        return f.group == g.group
+    return False
+
+
+def _mates(f: Feature, g: Feature) -> bool:
+    """Geometry: same line, overlapping extents (or same point for blobs)."""
+    d = tuple(g.pos[k] - f.pos[k] for k in range(3))
+    if f.kind == "gen":
+        return sum(c * c for c in d) ** 0.5 <= GEN_TOLERANCE
+    if not _parallel(f.axis, g.axis):
+        return False
+    along = sum(d[k] * f.axis[k] for k in range(3))
+    perp = tuple(d[k] - along * f.axis[k] for k in range(3))
+    if sum(c * c for c in perp) ** 0.5 > TOLERANCE:
+        return False
+    # g's extent on f's axis: it starts at `along` and runs g.length one way or the other
+    sign = 1.0 if sum(f.axis[k] * g.axis[k] for k in range(3)) >= 0 else -1.0
+    g_lo, g_hi = sorted((along, along + sign * g.length))
+    overlap = min(f.length, g_hi) - max(0.0, g_lo)
+    needed = min(MIN_OVERLAP, f.length, g.length)
+    return overlap >= needed - 1e-6
+
+
+def _cells(f: Feature, cell: float):
+    """Spatial-hash cells a segment passes through."""
+    steps = max(1, int(f.length // cell) + 1)
+    seen = set()
+    for n in range(steps + 1):
+        t = min(f.length, n * cell)
+        p = tuple(f.pos[k] + f.axis[k] * t for k in range(3))
+        key = tuple(round(c / cell) for c in p)
+        if key not in seen:
+            seen.add(key)
+            yield key
 
 
 def analyse(
@@ -333,31 +480,35 @@ def analyse(
             has_other.add(i)
         world.append(_moved(feats, piece.pos, piece.matrix))
 
-    # Spatial hash on rounded position: a male and a female at the same point.
-    cell = TOLERANCE * 2
+    # Spatial hash over the cells each receiving segment passes through; each
+    # giving segment looks in the cells along its own length.
+    cell = max(TOLERANCE * 2, GEN_TOLERANCE)
+    receivers = lambda f: f.gender == "F" or f.kind == "clip" or (f.kind == "fgr" and f.gender == "F")  # noqa: E731
     index: dict[tuple, list[tuple[int, Feature]]] = defaultdict(list)
     for i, feats in enumerate(world):
         for f in feats:
-            if f.gender == "F":
-                index[tuple(round(c / cell) for c in f.pos)].append((i, f))
+            if receivers(f):
+                for key in _cells(f, cell):
+                    index[key].append((i, f))
 
     connections = 0
     for i, feats in enumerate(world):
         for f in feats:
-            if f.gender != "M":
+            if receivers(f):
                 continue
-            base = tuple(round(c / cell) for c in f.pos)
-            for dx in (-1, 0, 1):
-                for dy in (-1, 0, 1):
-                    for dz in (-1, 0, 1):
-                        for j, g in index.get((base[0] + dx, base[1] + dy, base[2] + dz), ()):
-                            if j == i or abs(g.radius - f.radius) > 0.01:
-                                continue
-                            d = sum((f.pos[k] - g.pos[k]) ** 2 for k in range(3)) ** 0.5
-                            if d <= TOLERANCE and _parallel(f.axis, g.axis):
-                                if find(i) != find(j):
-                                    union(i, j)
-                                connections += 1
+            tried: set[tuple[int, int]] = set()
+            for base in _cells(f, cell):
+                for dx in (-1, 0, 1):
+                    for dy in (-1, 0, 1):
+                        for dz in (-1, 0, 1):
+                            for j, g in index.get((base[0] + dx, base[1] + dy, base[2] + dz), ()):
+                                if j == i or (j, id(g)) in tried:
+                                    continue
+                                tried.add((j, id(g)))
+                                if _receives(f, g) and _mates(f, g):
+                                    if find(i) != find(j):
+                                        union(i, j)
+                                    connections += 1
 
     # Press fit: geometry that overlaps another piece's by more than a sliver.
     if boxes:

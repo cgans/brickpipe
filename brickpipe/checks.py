@@ -200,7 +200,8 @@ def check_floating(
 def check_connectivity(
     pieces: list[PlacedPart], connectors, catalog: PartCatalog | None
 ) -> list[Finding]:
-    """Pieces that no stud, pin or axle attaches to the rest of the model.
+    """Pieces that no stud, pin, axle, bar, clip or hinge attaches to the rest
+    of the model.
 
     `connectors` is a connectivity.Connectors built from the LDraw library and
     the shadow library. Needs both; the caller decides whether to run it.
@@ -225,8 +226,8 @@ def check_connectivity(
             if firm:
                 out.append(Finding(
                     "error", "connectivity",
-                    f"{len(members)} piece(s) are not clipped to the model: no stud, pin "
-                    f"or axle joins them to it (e.g. {sample.part} in {where} at "
+                    f"{len(members)} piece(s) are not clipped to the model: no stud, pin, "
+                    f"axle, bar, clip or hinge joins them to it (e.g. {sample.part} in {where} at "
                     f"{tuple(round(v, 1) for v in sample.pos)})",
                     "Move these pieces so their studs or sockets line up with the pieces "
                     "they should attach to, or add the pieces that would join them.",
@@ -235,8 +236,8 @@ def check_connectivity(
             else:
                 out.append(Finding(
                     "warning", "connectivity",
-                    f"{len(members)} piece(s) are attached only by a clip, hinge or bar, "
-                    f"which this check cannot verify (e.g. {sample.part} in {where})",
+                    f"{len(members)} piece(s) carry only a connector type this check does "
+                    f"not understand, so they could not be verified (e.g. {sample.part} in {where})",
                     "", tuple(pieces[i] for i in members),
                 ))
     if report.unknown:

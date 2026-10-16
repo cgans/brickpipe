@@ -255,13 +255,16 @@ which adds a setup check and the Windows-specific commands.
 - **Floating** (needs `--nova-db`): groups of pieces whose bounding boxes touch
   nothing in the main structure.
 - **Connectivity** (needs `--nova-db` and the LDraw library): pieces that no
-  stud, pin or axle joins to the model.
+  stud, pin, axle, bar, clip or hinge joins to the model. Connectors are
+  matched as segments on a shared line with overlapping extents, so a pin
+  half-way through a hole or a clip anywhere along a bar counts.
 
 - **Prices** (needs the BrickLink API values): what the lots still to buy
   cost today, and which ones nobody sells, few sell, or are pricey per piece.
 
-Not covered: whether the model stands up under gravity, and connections made
-by clips, hinges and bars.
+Not covered: whether the model stands up under gravity, and connector types
+the shadow library does not describe (a few clip plates carry no clip record,
+for instance; such pieces are judged by their studs alone).
 
 ## Known limits
 
@@ -300,8 +303,7 @@ by clips, hinges and bars.
    146 MB, for the clip-together check. Download now? / Not now"), using the
    download and progress code that already exists. Also note what else
    depends on it and what the user sees when it is missing.
-3. Clip, hinge and bar connections in the connectivity check.
-4. Recognise bricks you already have from a photo, confirmed by you before
+3. Recognise bricks you already have from a photo, confirmed by you before
    they are subtracted.
 
 ## Notes for Nova
