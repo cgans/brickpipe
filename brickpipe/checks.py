@@ -209,14 +209,18 @@ def connectivity_report(pieces: list[PlacedPart], connectors, catalog: PartCatal
 KIND_NAMES = {"cyl": "stud, pin or axle", "clip": "bar in clip", "fgr": "hinge", "gen": "generic"}
 
 
-def connectivity_summary(report) -> str:
+def connectivity_summary(report, pieces: list[PlacedPart] | None = None) -> str:
     """One sentence saying what the check found, so a run can be told apart
-    from one that found nothing."""
+    from one that found nothing. With `pieces`, names the press-fitted parts."""
     kinds = ", ".join(f"{report.by_kind.get(k, 0)} {name}" for k, name in KIND_NAMES.items()
                       if report.by_kind.get(k, 0) or k == "cyl")
     text = f"{report.connections} connection(s) found ({kinds})"
     if report.press_fit_only:
         text += f"; {len(report.press_fit_only)} piece(s) are held only by a press fit (tyres on rims and the like)"
+        if pieces:
+            from collections import Counter
+            counts = Counter(pieces[i].part for i in report.press_fit_only)
+            text += ": " + ", ".join(f"{n}x {part}" for part, n in sorted(counts.items())[:8])
     return text
 
 
