@@ -47,6 +47,8 @@ class SubtractTests(unittest.TestCase):
         summary = inventory.summary(covered, leftover, inv)
         self.assertEqual((summary["unused"], summary["unused_lots"]), (12, 2))
         self.assertEqual((summary["spare"], summary["spare_lots"]), (0, 0))
+        csv_text = inventory.to_csv(covered, COLOURS, leftover)
+        self.assertIn("9999,4,Red,0,10,0", csv_text)
 
     def test_partly_used_lines_are_spare_not_unused(self):
         inv = inventory.from_text("3001, , 9\n7777, Red, 1\n", COLOURS)  # model needs 4 of 3001
@@ -55,8 +57,6 @@ class SubtractTests(unittest.TestCase):
         summary = inventory.summary(covered, leftover, inv)
         self.assertEqual((summary["spare"], summary["spare_lots"]), (5, 1))
         self.assertEqual((summary["unused"], summary["unused_lots"]), (1, 1))
-        csv_text = inventory.to_csv(covered, COLOURS, leftover)
-        self.assertIn("9999,4,Red,0,10,0", csv_text)
 
     def test_any_colour_is_shared_across_lots(self):
         inv = inventory.from_text("3035, , 1\n", COLOURS)
