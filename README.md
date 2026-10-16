@@ -295,8 +295,11 @@ by clips, hinges and bars.
    should get it automatically on first run (licence allows redistribution;
    the download is one HTTPS GET with a known size), whether a first-run
    prompt is better than a silent 146 MB download, and why the current flow
-   stops at a button. Also note what else depends on it and what the user
-   sees when it is missing.
+   stops at a button. Likely answer: a one-time prompt the first time the
+   page loads without a library ("brickpipe needs the LDraw part library,
+   146 MB, for the clip-together check. Download now? / Not now"), using the
+   download and progress code that already exists. Also note what else
+   depends on it and what the user sees when it is missing.
 3. Clip, hinge and bar connections in the connectivity check.
 4. Recognise bricks you already have from a photo, confirmed by you before
    they are subtracted.
