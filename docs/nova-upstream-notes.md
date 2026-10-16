@@ -56,3 +56,13 @@ build", and mention `docker builder prune` for a retry.
 which knows both, but it caught a client written from the source.
 
 Suggested change: return a list in both, or document the difference.
+
+## 6. Shadow library gaps (for LDCad's shadow library rather than Nova)
+
+The shadow library shipped as `data/offLibShadow` has no record for the
+`wpinhol2.dat` primitive ("Wheel Hole Notched over Cylinder"), which newer
+rims such as 6014b use for their hole. brickpipe carries its own record in
+`brickpipe/data/shadow-extra/`; the proper home is the shadow library itself.
+Any other primitive found missing goes in the same folder with a line in its
+README.
+

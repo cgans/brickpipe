@@ -279,6 +279,19 @@ class AnalyseTests(unittest.TestCase):
         self.assertIn("press fit only", csv_text)
         self.assertIn("3:48729a(clip)", csv_text)  # the bar is connected to the clip
 
+    def test_bundled_supplement_fills_shadow_gaps(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            lib, shadow = write_libraries(Path(tmp))
+            (lib / "p" / "wpinhol2.dat").write_text("0 Wheel Hole Notched over Cylinder\n")
+            (lib / "parts" / "6014b.dat").write_text(
+                "0 Wheel Rim 12 x 11 with Notched Hole\n1 16 0 0 .5 1 0 0 0 0 1 0 -7.5 0 wpinhol2.dat\n")
+            conn = c.Connectors(c.PartLibrary(lib), c.ShadowLibrary(shadow))
+            feats, _ = conn.features("6014b")
+        self.assertEqual(len(feats), 1)
+        self.assertEqual((feats[0].gender, feats[0].radius), ("F", 4.0))
+        self.assertAlmostEqual(feats[0].length, 7.5)
+        self.assertAlmostEqual(abs(feats[0].axis[2]), 1.0)  # the hole runs along Z in the rim
+
     def test_scaled_primitive_keeps_its_stretched_length(self):
         with tempfile.TemporaryDirectory() as tmp:
             conn = connectors(Path(tmp))

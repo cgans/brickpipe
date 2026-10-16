@@ -239,21 +239,32 @@ def gen_features(attrs: dict) -> list[Feature]:
 
 # -- libraries ---------------------------------------------------------------
 
+def bundled_supplement() -> Path:
+    """brickpipe's own records for primitives the shadow library lacks."""
+    return Path(__file__).resolve().parent / "data" / "shadow-extra"
+
+
 class ShadowLibrary:
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, extras: list[Path] | None = None):
+        """`extras` are folders with the same layout searched after `root`;
+        the bundled supplement is always last."""
         self.root = Path(root)
         if not (self.root / "parts").is_dir():
             raise FileNotFoundError(f"Shadow library not found at {self.root} (expected a parts/ folder)")
+        self.roots = [self.root, *(extras or []), bundled_supplement()]
         self._cache: dict[str, ShadowFile | None] = {}
 
     def get(self, name: str) -> ShadowFile | None:
         key = normalise_name(name)
         if key not in self._cache:
             self._cache[key] = None
-            for folder in ("parts", "p"):
-                path = self.root / folder / key
-                if path.is_file():
-                    self._cache[key] = parse_shadow(path.read_text("utf-8", "replace"))
+            for root in self.roots:
+                for folder in ("parts", "p"):
+                    path = root / folder / key
+                    if path.is_file():
+                        self._cache[key] = parse_shadow(path.read_text("utf-8", "replace"))
+                        break
+                if self._cache[key] is not None:
                     break
         return self._cache[key]
 
