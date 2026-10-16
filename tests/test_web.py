@@ -55,6 +55,7 @@ class WebTests(unittest.TestCase):
             self.assertIn(b"<title>brickpipe</title>", r.read())
         status, settings = http("GET", f"{self.base}/api/settings")
         self.assertEqual(settings["rounds"], 3)
+        self.assertIn("prices", settings["features"])
 
     def test_nova_listing(self):
         status, body = http("GET", f"{self.base}/api/nova/chats")
@@ -102,14 +103,22 @@ class WebTests(unittest.TestCase):
             assert creds.token_secret == "ts-secret"
             original(self, fetch=fake, sleep=lambda s: None)
         bricklink.Client.__init__ = patched
-        try:
-            status, run = http("POST", f"{self.base}/api/runs", {
-                "chat_id": "latest", "rounds": 0, "price_region": "eu",
+        import os
+        body = {"chat_id": "latest", "rounds": 0, "price_region": "eu",
                 "bricklink": {"consumer_key": "ck", "consumer_secret": "cs-secret",
-                              "token": "tk", "token_secret": "ts-secret"}})
+                              "token": "tk", "token_secret": "ts-secret"}}
+        try:
+            os.environ.pop("BRICKPIPE_FEATURES", None)
+            status, off = http("POST", f"{self.base}/api/runs", body)
+            off = self.wait_done(off["id"])
+            self.assertIsNone(off["result"]["price"])  # flag off: ignored even with values
+            self.assertFalse(fake.calls)
+            os.environ["BRICKPIPE_FEATURES"] = "prices"
+            status, run = http("POST", f"{self.base}/api/runs", body)
             run = self.wait_done(run["id"])
         finally:
             bricklink.Client.__init__ = original
+            os.environ.pop("BRICKPIPE_FEATURES", None)
         self.assertTrue(run["request"]["prices"])
         self.assertNotIn("bricklink", run["request"])
         self.assertIn("price", run["result"])

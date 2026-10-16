@@ -8,7 +8,7 @@ import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from . import availability, bom, bricklink, checks, connectivity, feedback, inventory, ldraw, nova, prices, rebrickable, steps
+from . import availability, bom, bricklink, checks, connectivity, feedback, features, inventory, ldraw, nova, prices, rebrickable, steps
 from .catalog import PartCatalog, load_colours
 
 
@@ -317,6 +317,11 @@ def price_setup(args) -> tuple[bricklink.Client | None, dict]:
     """The BrickLink client and options from --prices and its companions."""
     if not args.prices:
         return None, {}
+    if not features.enabled("prices"):
+        raise PipelineError(
+            "The price estimate is behind a feature flag: " + features.FLAGGED["prices"]
+            + f". Set {features.ENV}=prices to try it."
+        )
     creds = bricklink.Credentials.from_env()
     if creds is None:
         raise PipelineError(

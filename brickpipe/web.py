@@ -26,7 +26,7 @@ from pathlib import Path
 import urllib.parse
 from urllib.parse import parse_qs, unquote, urlparse
 
-from . import bricklink, connectivity, inventory, loop, nova, rebrickable
+from . import bricklink, connectivity, features, inventory, loop, nova, rebrickable
 from .catalog import load_colours
 from .cli import PipelineError, run_pipeline
 
@@ -173,7 +173,7 @@ class Runner:
         client = rebrickable.Client(key=key, cache_dir=rebrickable.default_cache_dir()) if key else None
         nova_db = Path(req["nova_db"]) if req.get("nova_db") else None
         ldraw_dir = Path(req["ldraw_dir"]) if req.get("ldraw_dir") else None
-        creds = bricklink.Credentials.from_dict(req.get("bricklink") or {})
+        creds = bricklink.Credentials.from_dict(req.get("bricklink") or {}) if features.enabled("prices") else None
         pricer = bricklink.Client(creds, cache_dir=bricklink.default_cache_dir()) if creds else None
         price_options = {
             "guide_type": "sold" if req.get("price_guide") == "sold" else "stock",
@@ -420,7 +420,8 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/settings":
             found = connectivity.find_ldraw_library()
             return self.send_json({**self.settings, "ldraw_dir": str(found or ""),
-                                   "ldraw_download": self.ldraw_download})
+                                   "ldraw_download": self.ldraw_download,
+                                   "features": features.all_flags()})
         if path == "/api/runs":
             runs = sorted(self.runner.runs.values(), key=lambda r: r.started_at, reverse=True)
             return self.send_json({"runs": [r.public() for r in runs[:50]]})

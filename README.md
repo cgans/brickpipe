@@ -129,11 +129,18 @@ lot with need, have and buy, and the report says how much is covered.
 Matching a Rebrickable collection needs the availability check, since that
 is where Rebrickable's part and colour ids come from.
 
-### Estimate what it will cost
+### Estimate what it will cost (experimental, behind a flag)
 
 ```
-python -m brickpipe model.mpd -o out/ --availability --prices --price-region north_america --price-currency USD
+BRICKPIPE_FEATURES=prices python -m brickpipe model.mpd -o out/ --availability --prices --price-region north_america --price-currency USD
 ```
+
+This is built and tested against canned responses but not yet against the
+live API, because BrickLink only issues API keys to **seller accounts**, and
+becoming one needs a single positive feedback: buy something from any
+BrickLink store first. Until that has been done the feature stays behind
+`BRICKPIPE_FEATURES=prices`; without it the page hides the panel and
+`--prices` says so.
 
 `--prices` asks BrickLink's price guide what each lot still to buy costs and
 writes `prices.csv` (average and lowest price each, line total, how many
@@ -257,6 +264,9 @@ Not covered: whether the model stands up under gravity, and connections made
 by clips, hinges and bars.
 
 ## Known limits
+
+- The price estimate (`--prices`) has not run against the live BrickLink API
+  yet; see the feature flag above.
 
 - The availability check has only been tested against canned responses that
   follow Rebrickable's API docs. Its first run against the live API is still
