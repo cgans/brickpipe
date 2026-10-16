@@ -288,8 +288,17 @@ by clips, hinges and bars.
    with `BRICKPIPE_FEATURES=prices` and run the model again. The first live
    run is the test; the `prices.csv` and any BrickLink error text are what to
    look at. Once it works, drop the flag and the feature is on for everyone.
-2. Clip, hinge and bar connections in the connectivity check.
-3. Recognise bricks you already have from a photo, confirmed by you before
+2. **Revisit: the LDraw part library has to be on the user's machine.** The
+   connectivity check needs the 146 MB `complete.zip` from ldraw.org. Today
+   the user has to notice the hint and press "Download the library" (or run
+   `--get-ldraw`); nothing fetches it on its own. Work out whether brickpipe
+   should get it automatically on first run (licence allows redistribution;
+   the download is one HTTPS GET with a known size), whether a first-run
+   prompt is better than a silent 146 MB download, and why the current flow
+   stops at a button. Also note what else depends on it and what the user
+   sees when it is missing.
+3. Clip, hinge and bar connections in the connectivity check.
+4. Recognise bricks you already have from a photo, confirmed by you before
    they are subtracted.
 
 ## Notes for Nova
