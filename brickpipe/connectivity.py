@@ -391,10 +391,11 @@ class Report:
     by_kind: dict[str, int] = field(default_factory=dict)  # connections per receiving kind
     press_fit_only: list[int] = field(default_factory=list)  # in the model only thanks to overlap
 
-    def summary(self) -> dict:
+    def summary(self, pieces: list[PlacedPart] | None = None) -> dict:
+        parts = sorted({pieces[i].part for i in self.press_fit_only}) if pieces else []
         return {"connections": self.connections, "by_kind": dict(self.by_kind),
-                "press_fit_only": len(self.press_fit_only), "groups": len(self.groups),
-                "unknown": len(self.unknown)}
+                "press_fit_only": len(self.press_fit_only), "press_fit_parts": parts[:8],
+                "groups": len(self.groups), "unknown": len(self.unknown)}
 
 
 def _parallel(a: Vec, b: Vec) -> bool:

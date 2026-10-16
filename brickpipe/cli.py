@@ -185,7 +185,7 @@ def run_pipeline(
             "Connectivity was checked: every piece is joined to the model by a stud, "
             "pin, axle, bar, clip or hinge." if not n_conn else
             "Connectivity was checked; see the connectivity findings below."
-        ) + " " + checks.connectivity_summary(conn_report) + "."
+        ) + " " + checks.connectivity_summary(conn_report, pieces) + "."
     if not connectors:
         missing = []
         if not shadow_path:
@@ -302,7 +302,7 @@ def run_pipeline(
         catalog.close()
 
     return Result(name, out, len(pieces), len(rows), findings, request, owned_summary, price_summary,
-                  conn_report.summary() if conn_report else None)
+                  conn_report.summary(pieces) if conn_report else None)
 
 
 def rebrickable_login(client: rebrickable.Client | None) -> int:

@@ -263,6 +263,8 @@ class AnalyseTests(unittest.TestCase):
         self.assertEqual(sorted(pieces[i].part for i in rep.press_fit_only), ["30374", "48729a"])
         self.assertIn("9 connection(s) found (8 stud, pin or axle, 1 bar in clip)", checks.connectivity_summary(rep))
         self.assertIn("2 piece(s) are held only by a press fit", checks.connectivity_summary(rep))
+        self.assertIn("1x 30374, 1x 48729a", checks.connectivity_summary(rep, pieces))
+        self.assertEqual(rep.summary(pieces)["press_fit_parts"], ["30374", "48729a"])
 
     def test_floating_brick_is_its_own_group(self):
         _, rep = self.analyse(
