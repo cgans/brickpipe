@@ -28,6 +28,15 @@ PARTS = {
     "4073.dat": "0 Plate  1 x  1 Round\n" + STUD.format(x=0, z=0),
     # tile: no studs
     "3070b.dat": "0 Tile  1 x  1\n",
+    # the rest have no geometry we need; their connectors are all in the shadow
+    "3700.dat": "0 Technic Brick  1 x  2 with Hole\n" + STUD.format(x=-10, z=0) + "\n" + STUD.format(x=10, z=0),
+    "3673.dat": "0 Technic Pin\n",
+    "48729a.dat": "0 Bar  1.5L with Clip\n",
+    "30374.dat": "0 Bar  4L\n",
+    "3937.dat": "0 Hinge Brick 1 x 2 Base\n",
+    "3938.dat": "0 Hinge Brick 1 x 2 Top\n",
+    "3815.dat": "0 Minifig Hips\n",
+    "3814.dat": "0 Minifig Torso\n",
 }
 PRIMS = {
     "stud.dat": "0 Stud\n",
@@ -39,6 +48,18 @@ SHADOW_PARTS = {
     "3035.dat": "0 !LDCAD SNAP_CYL [gender=F] [caps=one] [secs=R 6 4] [pos=0 8 0] [grid=C 8 C 4 20 20]",
     "4073.dat": "0 !LDCAD SNAP_CYL [gender=F] [caps=one] [secs=R 6 4] [pos=0 8 0]",
     "3070b.dat": "0 !LDCAD SNAP_CYL [gender=F] [caps=one] [secs=S 6 4] [pos=0 8 0]",
+    # a Technic hole runs along X through the brick at y=10
+    "3700.dat": "0 !LDCAD SNAP_CYL [gender=F] [caps=none] [secs=R 6 20] [center=true] [pos=0 10 0] [ori=0 -1 0 1 0 0 0 0 1]\n"
+                "0 !LDCAD SNAP_CYL [gender=F] [caps=one] [secs=S 6 4] [pos=0 24 0] [grid=C 2 1 20 0]",
+    "3673.dat": "0 !LDCAD SNAP_CLEAR\n0 !LDCAD SNAP_CYL [gender=M] [caps=none] [secs=L_ 6.25 2   R 6 16   R 8 4   R 6 16   _L 6.25 2] [center=true] [slide=true] [ori=0 -1 0 1 0 0 0 0 1]",
+    "48729a.dat": "0 !LDCAD SNAP_CLP [radius=4] [length=8] [center=true] [ori=1 0 0 0 0 1 0 -1 0]\n"
+                  "0 !LDCAD SNAP_CYL [gender=M] [caps=one] [secs=R 4 21] [slide=true] [pos=0 10 0] [ori=1 0 0 0 -1 0 0 0 -1]",
+    "30374.dat": "0 !LDCAD SNAP_CYL [gender=M] [caps=none] [secs=R 4 80] [center=true] [slide=true] [pos=0 40 0] [ori=-1 0 0 0 -1 0 0 0 1]",
+    "3937.dat": "0 !LDCAD SNAP_CYL [gender=F] [caps=one] [secs=S 6 4] [pos=0 24 0] [grid=C 2 1 20 0]\n"
+                "0 !LDCAD SNAP_FGR [group=hgBrC] [genderOfs=F] [seq=18 4 18] [radius=4] [pos=0 10 0] [ori=0 -1 0 1 0 0 0 0 1]",
+    "3938.dat": "0 !LDCAD SNAP_FGR [group=hgBrC] [genderOfs=M] [seq=18 4 18] [radius=4] [pos=0 10 0] [ori=0 -1 0 1 0 0 0 0 1]",
+    "3815.dat": "0 !LDCAD SNAP_GEN [group=frdsHps] [gender=M] [bounding=box 8 4 4] [pos=0 -15.4 -0.3]",
+    "3814.dat": "0 !LDCAD SNAP_GEN [group=frdsHps] [gender=F] [bounding=box 8 4 4] [pos=0 16.6 -0.3]",
 }
 SHADOW_PRIMS = {
     "stud.dat": "0 !LDCAD SNAP_CYL [ID=studC] [gender=M] [caps=one] [secs=R 6 4]",
@@ -94,8 +115,30 @@ class RecordTests(unittest.TestCase):
         feats = c.cyl_features({"gender": "F", "secs": "R 4 4", "pos": "0 -4 0",
                                 "ori": "1 0 0 0 -1 0 0 0 -1"})
         self.assertEqual(len(feats), 1)
-        self.assertEqual(feats[0].axis, (0.0, -1.0, 0.0))
+        self.assertEqual(feats[0].axis, (0.0, 1.0, 0.0))  # -Y of a flipped frame points down
         self.assertEqual(feats[0].radius, 4.0)
+        self.assertEqual(feats[0].length, 4.0)
+
+    def test_sections_pick_the_dominant_radius_and_total_length(self):
+        self.assertEqual(c._sections("L_ 6.25 2   R 6 16   R 8 4   R 6 16   _L 6.25 2"), (6.0, 40.0))
+        self.assertEqual(c._sections("S 6 4"), (6.0, 4.0))
+        self.assertEqual(c._sections(""), (None, 0.0))
+
+    def test_centred_segment_starts_half_a_length_back(self):
+        feats = c.cyl_features({"gender": "M", "secs": "A 6 80", "center": "true",
+                                "ori": "0 -1 0 1 0 0 0 0 1"})
+        self.assertEqual(feats[0].length, 80.0)
+        self.assertAlmostEqual(feats[0].pos[0], -40.0)  # runs along +X from -40 to 40
+        self.assertAlmostEqual(feats[0].axis[0], 1.0)
+
+    def test_clip_finger_and_generic_records_become_features(self):
+        clip = c.clip_features({"radius": "4", "length": "8", "center": "true"})
+        self.assertEqual((clip[0].kind, clip[0].gender, clip[0].radius, clip[0].length), ("clip", "F", 4.0, 8.0))
+        fgr = c.finger_features({"group": "hgBrC", "genderofs": "F", "seq": "18 4 18", "radius": "4",
+                                 "pos": "0 10 0", "ori": "0 -1 0 1 0 0 0 0 1"})
+        self.assertEqual((fgr[0].kind, fgr[0].gender, fgr[0].group, fgr[0].length), ("fgr", "F", "hgBrC", 40.0))
+        gen = c.gen_features({"group": "frdsHps", "gender": "M", "bounding": "box 8 4 4", "pos": "0 -15.4 -0.3"})
+        self.assertEqual((gen[0].kind, gen[0].group), ("gen", "frdsHps"))
 
     def test_shadow_parse_kinds(self):
         s = c.parse_shadow(
@@ -104,7 +147,8 @@ class RecordTests(unittest.TestCase):
         )
         self.assertTrue(s.clear)
         self.assertEqual(s.includes[0][0], "connhole.dat")
-        self.assertEqual(s.other, 1)
+        self.assertEqual(s.other, 0)
+        self.assertEqual(len(s.clips), 1)
         self.assertEqual(len(s.cyls), 1)
 
 
@@ -160,6 +204,46 @@ class AnalyseTests(unittest.TestCase):
             "1 4 5 -24 0 1 0 0 0 1 0 0 0 1 3001.dat\n"
         )
         self.assertEqual(len(rep.groups), 2)
+
+    def test_pin_half_way_through_a_hole_connects(self):
+        # Pin centred on the brick's face at x=-20: half in the hole, half out.
+        _, rep = self.analyse(
+            "0 FILE a.ldr\n1 4 0 0 0 1 0 0 0 1 0 0 0 1 3700.dat\n"
+            "1 4 -20 10 0 1 0 0 0 1 0 0 0 1 3673.dat\n"
+        )
+        self.assertEqual(len(rep.groups), 1)
+        _, rep = self.analyse(  # pin beside the brick, pointing the same way, not in the hole
+            "0 FILE a.ldr\n1 4 0 0 0 1 0 0 0 1 0 0 0 1 3700.dat\n"
+            "1 4 0 10 30 1 0 0 0 1 0 0 0 1 3673.dat\n"
+        )
+        self.assertEqual(len(rep.groups), 2)
+
+    def test_bar_held_anywhere_along_its_length_by_a_clip(self):
+        # Bar 4L runs along Y from 0 to 80 (LDraw bars stand upright); the clip's jaw runs
+        # along Z through its own origin, so turn the clip 90 degrees about X to put the jaw
+        # along Y, and place it a third of the way up the bar.
+        _, rep = self.analyse(
+            "0 FILE a.ldr\n1 0 0 0 0 1 0 0 0 1 0 0 0 1 30374.dat\n"
+            "1 4 0 25 0 1 0 0 0 0 1 0 -1 0 48729a.dat\n"
+        )
+        self.assertEqual(len(rep.groups), 1)
+        _, rep = self.analyse(  # clip 5 LDU off the bar's line
+            "0 FILE a.ldr\n1 0 0 0 0 1 0 0 0 1 0 0 0 1 30374.dat\n"
+            "1 4 5 25 0 1 0 0 0 0 1 0 -1 0 48729a.dat\n"
+        )
+        self.assertEqual(len(rep.groups), 2)
+
+    def test_hinge_fingers_mate_and_minifig_hips_fit_a_torso(self):
+        _, rep = self.analyse(
+            "0 FILE a.ldr\n1 4 0 0 0 1 0 0 0 1 0 0 0 1 3937.dat\n"
+            "1 4 0 0 0 1 0 0 0 1 0 0 0 1 3938.dat\n"  # top sits on the base, finger rows coincide
+        )
+        self.assertEqual(len(rep.groups), 1)
+        _, rep = self.analyse(
+            "0 FILE a.ldr\n1 4 0 0 0 1 0 0 0 1 0 0 0 1 3815.dat\n"
+            "1 4 0 -32 0 1 0 0 0 1 0 0 0 1 3814.dat\n"  # torso 32 up: its female blob lands on the hips' male
+        )
+        self.assertEqual(len(rep.groups), 1)
 
     def test_floating_brick_is_its_own_group(self):
         _, rep = self.analyse(

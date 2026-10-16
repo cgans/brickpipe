@@ -185,7 +185,7 @@ if ((Test-Path $nova) -and (Test-Path $novaDocker)) {
     Fail "Nova folders" "ldraw-nova and ldraw-nova-docker are not next to brickpipe" $cloneFix
 }
 
-# --- Needed for the stud connectivity check ----------------------------------
+# --- Needed for the connectivity check ----------------------------------
 
 $ldraw = $null
 if ($env:LDRAW_DIR -and (Test-Path $env:LDRAW_DIR)) { $ldraw = $env:LDRAW_DIR }
