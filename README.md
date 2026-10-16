@@ -98,13 +98,37 @@ Needs two things, both found automatically when they are in the usual places:
   A part's studs are references to the `stud.dat` primitive in its official
   geometry, so the geometry has to be read.
 - **Nova's shadow library** (`data/offLibShadow` next to its database): LDCad's
-  connector records, which say where each part's sockets, pins and holes are.
+  connector records, which say where each part's sockets, pins, holes, clips
+  and hinge fingers are. brickpipe adds records of its own for the few
+  primitives that library lacks (`brickpipe/data/shadow-extra/`, with a
+  README listing each one and why).
 
-A piece counts as attached when one of its studs, pins or axles sits exactly
-in a matching socket or hole on another piece. Pieces that nothing attaches to
-are errors and go into `feedback.md`. Pieces held only by clips, hinges or
-bars, or with no connector data, are reported as unverified rather than
-flagged. Overlapping geometry (a tyre on a rim) counts as a press fit.
+Every connector is a segment: a point, a direction and a length. Two mate
+when they are on different pieces, parallel, on the same line (within 1.5
+LDU) and overlapping along it, and their kinds fit: a stud, pin, axle or bar
+into a socket, hole or holder of the same radius; a bar into a clip; hinge
+fingers into matching fingers; a generic connector (minifig hips to torso)
+into its counterpart. Because overlap is what counts, a pin half-way through
+a hole or a clip anywhere along a bar is a connection. Overlapping geometry
+(a tyre on a rim) counts as a press fit.
+
+Pieces are grouped by their connections; the biggest group is the model.
+Pieces that nothing attaches to are errors and go into `feedback.md`. Pieces
+with no connector data at all are listed as unverified rather than flagged.
+
+The report says what the check found, not just that it ran:
+
+> Connectivity was checked: every piece is joined to the model by a stud,
+> pin, axle, bar, clip or hinge. 678 connection(s) found (678 stud, pin or
+> axle); 4 piece(s) are held only by a press fit (tyres on rims and the
+> like): 4x 6015.
+
+`connectivity.csv` has one row per piece: its submodel and position, which
+group it landed in, its status (attached, loose, press fit only, no connector
+data), what it is connected to and what it merely overlaps. When a piece is
+flagged, or held only by a press fit when it should not be, that file says
+why. Pieces held only by a press fit are the usual hint that a part's
+connector is missing from the shadow library.
 
 This is still not a proof that the model stands up; it is a proof that it can
 be assembled.
@@ -242,6 +266,18 @@ which adds a setup check and the Windows-specific commands.
 
 6. **Order and build.** Note every place the model could not be assembled as
    drawn. That list decides what to build next here.
+
+### Checking a change against a real model
+
+The unit tests use hand-built part and shadow libraries; they prove the rules,
+not the data. Every change to a check is also run against a model that was
+clean before, and the test is a *prediction*, not a re-run: say what the
+numbers in the report should become, then look. The BRAT model is the
+reference for connectivity (131 pieces, four wheels on stub axles). That is
+how the segment matcher was found to be right and the wheel rims wrong: the
+count of pieces "held only by a press fit" was 8 where it should have been 4,
+`connectivity.csv` showed the rims had no connector, and the cause was a
+primitive the shadow library does not describe.
 
 ## What the checks do and do not cover
 
