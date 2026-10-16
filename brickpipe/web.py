@@ -278,6 +278,7 @@ class Runner:
                 "final_model": outcome.final_model.name if outcome.final_model else None,
                 "owned": last.result.owned if last else None,
                 "price": last.result.price if last else None,
+                "connectivity": last.result.connectivity if last else None,
             }
             run.status = "stopped" if run.stop_requested else "done"
             models = produced()  # snapshots may have finished rendering since

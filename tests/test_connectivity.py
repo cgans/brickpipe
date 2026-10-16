@@ -245,6 +245,25 @@ class AnalyseTests(unittest.TestCase):
         )
         self.assertEqual(len(rep.groups), 1)
 
+    def test_report_counts_connections_by_kind_and_press_fit_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            conn = connectors(Path(tmp))
+            pieces = pieces_of(
+                "0 FILE a.ldr\n1 4 0 0 0 1 0 0 0 1 0 0 0 1 3035.dat\n"
+                "1 4 0 -24 0 1 0 0 0 1 0 0 0 1 3001.dat\n"
+                "1 0 0 0 0 1 0 0 0 1 0 0 0 1 30374.dat\n"
+                "1 4 0 25 0 1 0 0 0 0 1 0 -1 0 48729a.dat\n"
+            )
+            boxes = [((-80, -8, -40), (80, 8, 40)), ((-40, -48, -20), (40, -24, 20)),
+                     ((-4, -1, -4), (4, 81, 4)), ((-5, 20, -5), (5, 30, 5))]
+            rep = c.analyse(pieces, conn, boxes)
+        self.assertEqual(rep.by_kind, {"cyl": 8, "clip": 1})
+        self.assertEqual(rep.connections, 9)
+        # the bar and clip overlap the plate's box, so press fit pulls them in; no connector did
+        self.assertEqual(sorted(pieces[i].part for i in rep.press_fit_only), ["30374", "48729a"])
+        self.assertIn("9 connection(s) found (8 stud, pin or axle, 1 bar in clip)", checks.connectivity_summary(rep))
+        self.assertIn("2 piece(s) are held only by a press fit", checks.connectivity_summary(rep))
+
     def test_floating_brick_is_its_own_group(self):
         _, rep = self.analyse(
             "0 FILE a.ldr\n1 4 0 0 0 1 0 0 0 1 0 0 0 1 3035.dat\n"

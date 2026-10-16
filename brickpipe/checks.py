@@ -197,8 +197,31 @@ def check_floating(
     return out
 
 
+def connectivity_report(pieces: list[PlacedPart], connectors, catalog: PartCatalog | None):
+    """Run the connectivity analysis once; feed the result to check_connectivity
+    and to the report's summary line."""
+    from . import connectivity
+
+    boxes = [world_box(p, catalog) if catalog else None for p in pieces]
+    return connectivity.analyse(pieces, connectors, boxes if catalog else None)
+
+
+KIND_NAMES = {"cyl": "stud, pin or axle", "clip": "bar in clip", "fgr": "hinge", "gen": "generic"}
+
+
+def connectivity_summary(report) -> str:
+    """One sentence saying what the check found, so a run can be told apart
+    from one that found nothing."""
+    kinds = ", ".join(f"{report.by_kind.get(k, 0)} {name}" for k, name in KIND_NAMES.items()
+                      if report.by_kind.get(k, 0) or k == "cyl")
+    text = f"{report.connections} connection(s) found ({kinds})"
+    if report.press_fit_only:
+        text += f"; {len(report.press_fit_only)} piece(s) are held only by a press fit (tyres on rims and the like)"
+    return text
+
+
 def check_connectivity(
-    pieces: list[PlacedPart], connectors, catalog: PartCatalog | None
+    pieces: list[PlacedPart], connectors, catalog: PartCatalog | None, report=None
 ) -> list[Finding]:
     """Pieces that no stud, pin, axle, bar, clip or hinge attaches to the rest
     of the model.
@@ -206,10 +229,8 @@ def check_connectivity(
     `connectors` is a connectivity.Connectors built from the LDraw library and
     the shadow library. Needs both; the caller decides whether to run it.
     """
-    from . import connectivity
-
-    boxes = [world_box(p, catalog) if catalog else None for p in pieces]
-    report = connectivity.analyse(pieces, connectors, boxes if catalog else None)
+    if report is None:
+        report = connectivity_report(pieces, connectors, catalog)
     out: list[Finding] = []
     if len(report.groups) <= 1:
         pass

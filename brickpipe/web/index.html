@@ -677,8 +677,8 @@ ul.history button:hover b { text-decoration: underline; }
       o.className = 'outcome ' + (run.status === 'failed' ? 'failed' : clean ? 'clean' : 'stopped');
       o.innerHTML = run.status === 'failed'
         ? `<b>The run failed.</b> ${esc(run.error || '')}`
-        : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.` + ownedLine(run) + priceLine(run) + viewerBox(run)
-        : `<b>Stopped before the model was clean.</b> ${esc(run.result ? run.result.reason : '')} The files below are for the last model checked.` + ownedLine(run) + priceLine(run);
+        : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.` + ownedLine(run) + priceLine(run) + connectivityLine(run) + viewerBox(run)
+        : `<b>Stopped before the model was clean.</b> ${esc(run.result ? run.result.reason : '')} The files below are for the last model checked.` + ownedLine(run) + priceLine(run) + connectivityLine(run);
     } else { o.hidden = true; }
     wireViewer(run);
 
@@ -729,6 +729,13 @@ ul.history button:hover b { text-decoration: underline; }
       </div>
       <iframe class="viewer-frame" src="${esc(src)}" title="Nova's 3D viewer" loading="lazy" allow="xr-spatial-tracking; fullscreen"></iframe>
     </div>`;
+  }
+  function connectivityLine(run) {
+    const c = run.result && run.result.connectivity;
+    if (!c) return '';
+    const names = { cyl: 'stud, pin or axle', clip: 'bar in clip', fgr: 'hinge', gen: 'generic' };
+    const kinds = Object.entries(names).filter(([k]) => (c.by_kind[k] || 0) || k === 'cyl').map(([k, n]) => `${c.by_kind[k] || 0} ${n}`).join(', ');
+    return `<p style="margin-top:8px" class="muted small">Connectivity: ${c.connections} connection${c.connections === 1 ? '' : 's'} (${kinds})${c.press_fit_only ? `; ${c.press_fit_only} piece${c.press_fit_only === 1 ? '' : 's'} held only by a press fit` : ''}${c.unknown ? `; ${c.unknown} with no connector data` : ''}.</p>`;
   }
   function priceLine(run) {
     const p = run.result && run.result.price;
