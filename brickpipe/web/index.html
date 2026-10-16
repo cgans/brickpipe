@@ -616,6 +616,7 @@ ul.history button:hover b { text-decoration: underline; }
   // the build sheet
   let current = null, source = null;
   function show(run) {
+    if (!current || current.id !== run.id) view.pinned = false;
     current = run;
     $('emptySheet').hidden = true; $('runSheet').hidden = false;
     render(run);
@@ -708,14 +709,15 @@ ul.history button:hover b { text-decoration: underline; }
   }
 
   // Nova's own 3D viewer and build player, embedded. One frame; tabs pick the mode and the round.
-  let view = { round: null, mode: 'viewer' };
+  let view = { round: null, mode: 'viewer', pinned: false };  // pinned: the user chose a round
   function viewerBox(run) {
     const withViewer = run.rounds.filter(r => r.viewer);
     if (!withViewer.length) {
       const last = run.rounds.filter(r => r.image).slice(-1)[0];
       return last ? `<div class="final-render"><a href="${esc(last.image)}" target="_blank" rel="noreferrer"><img src="${esc(last.image)}" alt="render of the final model"></a></div>` : '';
     }
-    const r = withViewer.find(x => x.number === view.round) || withViewer[withViewer.length - 1];
+    // Follow the newest round as the run progresses, unless the user picked one.
+    const r = (view.pinned && withViewer.find(x => x.number === view.round)) || withViewer[withViewer.length - 1];
     view.round = r.number;
     const src = view.mode === 'player' ? r.player : r.viewer;
     return `<div class="viewer-wrap">
@@ -745,7 +747,7 @@ ul.history button:hover b { text-decoration: underline; }
   function wireViewer(run) {
     document.querySelectorAll('[data-mode]').forEach(b => b.onclick = () => { view.mode = b.dataset.mode; render(run); });
     document.querySelectorAll('[data-view]').forEach(b => b.onclick = () => {
-      view.round = Number(b.dataset.view);
+      view.round = Number(b.dataset.view); view.pinned = true;
       if ($('outcome').hidden) { $('outcome').hidden = false; $('outcome').className = 'outcome'; $('outcome').innerHTML = viewerBox(run); wireViewer(run); }
       else render(run);
       $('outcome').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
