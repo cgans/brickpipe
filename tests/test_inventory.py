@@ -36,15 +36,25 @@ class SubtractTests(unittest.TestCase):
         self.assertEqual([(r.part, r.colour, r.quantity) for r in left], [("3001", 15, 1), ("3035", 4, 1)])
         self.assertEqual(inventory.summary(covered), {"need": 7, "have": 5, "buy": 2,
                                                       "lots_covered": 2, "lots_total": 4,
-                                                      "unused": 0, "unused_lots": 0})
+                                                      "unused": 0, "unused_lots": 0,
+                                                      "spare": 0, "spare_lots": 0})
 
     def test_listed_bricks_the_model_does_not_use_are_reported(self):
         inv = inventory.from_text("3001, White, 3\n9999, Red, 10\n3001, Red, 2\n", COLOURS)
         leftover = {}
         covered = inventory.subtract(self.rows, inv, leftover=leftover)
         self.assertEqual(leftover, {("9999", 4): 10, ("3001", 4): 2})
-        summary = inventory.summary(covered, leftover)
+        summary = inventory.summary(covered, leftover, inv)
         self.assertEqual((summary["unused"], summary["unused_lots"]), (12, 2))
+        self.assertEqual((summary["spare"], summary["spare_lots"]), (0, 0))
+
+    def test_partly_used_lines_are_spare_not_unused(self):
+        inv = inventory.from_text("3001, , 9\n7777, Red, 1\n", COLOURS)  # model needs 4 of 3001
+        leftover = {}
+        covered = inventory.subtract(self.rows, inv, leftover=leftover)
+        summary = inventory.summary(covered, leftover, inv)
+        self.assertEqual((summary["spare"], summary["spare_lots"]), (5, 1))
+        self.assertEqual((summary["unused"], summary["unused_lots"]), (1, 1))
         csv_text = inventory.to_csv(covered, COLOURS, leftover)
         self.assertIn("9999,4,Red,0,10,0", csv_text)
 
@@ -122,7 +132,7 @@ class PipelineTests(unittest.TestCase):
             report = (Path(tmp) / "out" / "report.md").read_text()
         self.assertEqual(code, 0)
         self.assertIn("You already have 2 of the 7 pieces", report)
-        self.assertIn("5 of the bricks you listed (1 line(s)) are not used in this model", report)
+        self.assertIn("1 line(s) you typed, 5 brick(s), matched nothing in this model", report)
 
 
 if __name__ == "__main__":
