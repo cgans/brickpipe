@@ -39,9 +39,10 @@ there for the things a render does not show:
   whether LEGO ever made that part in that colour, and in how many sets. A
   colour that was never made is an error; one made in only a couple of sets
   is a warning with commoner alternatives named.
-- **Is it attached?** Each stud, pin and axle on each piece is matched to a
-  socket on another piece. Anything not joined to the main body is reported
-  by part and position, so the agent can move it.
+- **Is it attached?** Each stud, pin, axle, bar, clip and hinge on each piece
+  is matched to its counterpart on another piece. Anything not joined to the
+  main body is reported by part and position, so the agent can move it, and
+  the report says how many connections of each kind it found.
 - **Is the file sane?** Missing submodels, loops, pieces placed twice in the
   same spot, colour left unset, build steps too big to follow.
 
