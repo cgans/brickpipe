@@ -274,6 +274,10 @@ class AnalyseTests(unittest.TestCase):
         self.assertIn("2 piece(s) are held only by a press fit", checks.connectivity_summary(rep))
         self.assertIn("1x 30374, 1x 48729a", checks.connectivity_summary(rep, pieces))
         self.assertEqual(rep.summary(pieces)["press_fit_parts"], ["30374", "48729a"])
+        csv_text = c.to_csv(rep, pieces)
+        self.assertIn("1,3001,4,main,0.0,-24.0,0.0,0,attached,8,", csv_text)
+        self.assertIn("press fit only", csv_text)
+        self.assertIn("3:48729a(clip)", csv_text)  # the bar is connected to the clip
 
     def test_scaled_primitive_keeps_its_stretched_length(self):
         with tempfile.TemporaryDirectory() as tmp:
