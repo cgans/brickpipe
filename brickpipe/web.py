@@ -307,7 +307,7 @@ class Runner:
                 agent, chat_id, model, run.dir,
                 max_rounds=int(req.get("rounds") or 3), approve_tools=True,
                 log=run.note, on_event=on_event, on_round=on_round,
-                stop=lambda: run.stop_requested,
+                stop=lambda: run.stop_requested, llm_model_id=req.get("llm_model_id") or None,
                 nova_db=nova_db, check_availability=bool(client), client=client,
                 owned=owned, owned_rebrickable_token=user_token if client else None,
                 ldraw_dir=ldraw_dir, pricer=pricer, price_options=price_options,
@@ -343,13 +343,14 @@ class Runner:
         models_dir = run.dir / "models"
         if req.get("prompt"):
             set_status("designing", "Starting a new Nova chat")
-            chat = agent.create_chat()
+            chat = agent.create_chat(llm_model_id=req.get("llm_model_id") or None)
             run.chat_id, run.chat_url = chat["id"], agent.chat_url(chat["id"])
             run.emit("chat", {"chat_id": run.chat_id, "chat_url": run.chat_url})
             run.note(f"Asked Nova to design: {req['prompt'][:120]}")
             run.agent_text = ""
             agent.send(chat["id"], req["prompt"] + DESIGN_MESSAGE_SUFFIX,
-                       options={"mode": "agent", "permissions": "full"})
+                       options={"mode": "agent", "permissions": "full"},
+                       llm_model_id=req.get("llm_model_id") or None)
             set_status("designing", "The agent is designing the model")
             turn = agent.wait_for_turn(chat["id"], approve_tools=True, on_event=on_event,
                                        stop=lambda: run.stop_requested)
@@ -475,6 +476,18 @@ class Handler(BaseHTTPRequestHandler):
                 {k: m.get(k) for k in ("file", "name", "parts", "image_url", "chats")}
                 for m in agent.generated_models() if not m.get("gallery")
             ]})
+        if path == "/api/nova/llm-models":
+            def accounts(agent):
+                listing = agent.llm_models()
+                return {"default_id": listing["default_id"], "models": [
+                    {"id": m.get("id"), "name": m.get("model_name") or (m.get("litellm_params") or {}).get("model"),
+                     "model": (m.get("litellm_params") or {}).get("model"), "auth_mode": m.get("auth_mode")}
+                    for m in listing["models"]]}
+            return self.proxy_nova(accounts)
+        if path == "/api/nova/model-catalog":
+            return self.proxy_nova(lambda agent: {"models": [
+                {"model": m.get("model"), "name": m.get("display_name") or m.get("name") or m.get("model")}
+                for m in agent.model_catalog() if m.get("model")]})
         if path == "/api/nova/chats":
             return self.proxy_nova(lambda agent: {"chats": [
                 {"id": c["id"], "title": c.get("title", ""), "updated_at": c.get("updated_at")}
@@ -506,6 +519,16 @@ class Handler(BaseHTTPRequestHandler):
             return self.send_json({"user_token": token})
         if path == "/api/ldraw/download":
             return self.start_ldraw_download()
+        if path == "/api/nova/llm-models":
+            body = self.read_json()
+            model, key, name = (body.get("model") or "").strip(), (body.get("api_key") or "").strip(), (body.get("name") or "").strip()
+            if not (model and key):
+                return self.send_json({"error": "A model and a key are needed."}, 400)
+            return self.proxy_nova(lambda agent: {
+                "id": agent.add_llm_model(model, key, name or f"{model} (own key)")["id"]})
+        m = re.fullmatch(r"/api/nova/llm-models/([\w-]+)/delete", path)
+        if m:
+            return self.proxy_nova(lambda agent: (agent.delete_llm_model(m.group(1)), {"deleted": True})[1])
         if path == "/api/runs":
             body = self.read_json()
             if not (body.get("prompt") or body.get("chat_id") or body.get("model_file")):
@@ -625,6 +648,7 @@ def make_server(port: int = DEFAULT_PORT, runs_dir: Path | None = None,
         "rounds": 3,
         "locked": bool(locked),
         "rebrickable_key": rebrickable_key or None,
+        "host_name": os.environ.get("BRICKPIPE_HOST_NAME") or "",
     }
     handler.runner = Runner(runs_dir or here / "runs", handler.settings)
     handler.page = resources.files("brickpipe").joinpath("web/index.html").read_bytes()

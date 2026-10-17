@@ -133,6 +133,28 @@ class WebTests(unittest.TestCase):
         self.assertTrue(fake.calls)  # the run really asked for prices
         self.assertIn("prices.csv", run["files"])
 
+    def test_own_ai_key_is_registered_in_nova_and_used_for_the_run(self):
+        status, acc = http("GET", f"{self.base}/api/nova/llm-models")
+        self.assertEqual(acc["default_id"], "host")
+        self.assertEqual(acc["models"][0]["name"], "Chris's Claude")
+        self.assertNotIn("litellm_params", json.dumps(acc))  # keys never reach the page, masked or not
+        status, cat = http("GET", f"{self.base}/api/nova/model-catalog")
+        self.assertIn("anthropic/claude-sonnet-5", [m["model"] for m in cat["models"]])
+        status, made = http("POST", f"{self.base}/api/nova/llm-models",
+                            {"model": "openai/gpt-6-luna", "api_key": "sk-family", "name": "gpt-6-luna (own key)"})
+        self.assertEqual(status, 200)
+        self.assertEqual(self.fake.llm_entries[made["id"]]["key"], "sk-family")  # Nova holds the key
+        status, run = http("POST", f"{self.base}/api/runs", {"prompt": "a shed", "llm_model_id": made["id"]})
+        run = self.wait_done(run["id"])
+        self.assertEqual(run["status"], "done")
+        chat = self.fake.chats[run["chat_id"]]
+        self.assertEqual(chat["llm_model_id"], made["id"])  # the chat was created on the family member's account
+        self.assertTrue(all(m.get("llm_model_id") == made["id"] for m in self.fake.messages[-2:]))  # design + repair
+        self.assertNotIn("sk-family", json.dumps(run))
+        status, gone = http("POST", f"{self.base}/api/nova/llm-models/{made['id']}/delete", {})
+        self.assertTrue(gone["deleted"])
+        self.assertNotIn(made["id"], self.fake.llm_entries)
+
     def test_history_lists_runs_newest_first(self):
         for _ in range(2):
             status, run = http("POST", f"{self.base}/api/runs", {"chat_id": "latest", "rounds": 0})
