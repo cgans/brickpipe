@@ -30,6 +30,14 @@ flowchart LR
 - Links from brickpipe into Nova (the chat, the 3D viewer) use the public
   hostname, so they work from outside.
 - Everyone shares one Nova: all chats and all runs are visible to all.
+- **Whose AI account pays.** Nova's default model entry (your key or your
+  Claude sign-in) is what runs unless a person brings their own: under
+  Settings > AI account they can switch from "Use <host>'s AI account" to
+  "Use my own key", pick a provider and model, and paste a key. brickpipe
+  registers it in Nova as a model entry of its own; Nova keeps the key in
+  its settings store on the server, and that person's runs are billed to
+  it. "Forget" removes the entry again. Set `BRICKPIPE_HOST_NAME=Chris` so
+  the toggle names you.
 
 ## 0. Before you start
 

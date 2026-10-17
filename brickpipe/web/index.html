@@ -337,6 +337,43 @@ ul.history button:hover b { text-decoration: underline; }
       </div>
     </div>
 
+    <div class="panel stack" id="aiPanel">
+      <h2>AI account</h2>
+      <p class="small muted">Nova's agent runs on an AI provider account. Use the one this brickpipe comes with, or bring your own key so your designs are billed to you.</p>
+      <div>
+        <label><input type="radio" name="aiMode" value="host" id="aiHost" checked> <span id="aiHostLabel">Use the host's account</span></label>
+        <p class="small muted" id="aiHostNote" style="margin:2px 0 8px 24px"></p>
+        <label><input type="radio" name="aiMode" value="own" id="aiOwn"> Use my own key</label>
+      </div>
+      <div id="aiOwnFields" class="stack" hidden>
+        <div id="aiSaved" hidden class="row">
+          <span class="small">Using <b id="aiSavedName"></b> with your key.</span>
+          <button class="btn quiet small" id="aiForget" type="button">Forget</button>
+        </div>
+        <div id="aiForm" class="stack">
+          <div class="row">
+            <div class="grow">
+              <label for="aiProvider">Provider</label>
+              <select id="aiProvider"><option value="anthropic">Anthropic (Claude)</option><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option></select>
+            </div>
+            <div class="grow">
+              <label for="aiModel">Model</label>
+              <select id="aiModel"></select>
+            </div>
+          </div>
+          <div>
+            <label for="aiKey">API key</label>
+            <input id="aiKey" type="password" autocomplete="off" placeholder="sk-…">
+            <p class="small muted">Sent once to Nova, which keeps it in its own settings on the server for your runs. It is not kept in this browser.</p>
+          </div>
+          <div class="row">
+            <button class="btn quiet small" id="aiSave" type="button">Save to Nova</button>
+            <span class="err small" id="aiError"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="panel stack">
       <h2>Checks</h2>
       <p class="small muted">Each of these turns on one more check. Keys stay in this browser and are only sent to brickpipe on your machine for the run.</p>
@@ -465,6 +502,10 @@ ul.history button:hover b { text-decoration: underline; }
     $('rounds').value = store.get('rounds', '') || s.rounds;
     $('rebrickableKey').value = store.get('rebrickable_key', '');
     hosted = !!s.locked; serverKey = !!s.has_server_key;
+    hostName = s.host_name || '';
+    $('aiHostLabel').textContent = hostName ? `Use ${hostName}'s AI account` : (hosted ? "Use the host's account" : "Use Nova's default account");
+    if (store.get('ai_mode', 'host') === 'own') $('aiOwn').checked = true;
+    loadAiAccounts();
     $('lockedNote').hidden = !hosted;
     $('novaFields').hidden = hosted;
     $('ldrawFields').hidden = hosted;
@@ -475,7 +516,52 @@ ul.history button:hover b { text-decoration: underline; }
     rbRender();
     settingsHint();
   }
-  let flags = {}, hosted = false, serverKey = false;
+  let flags = {}, hosted = false, serverKey = false, hostName = '';
+  let catalog = [];
+  function aiRender() {
+    const own = $('aiOwn').checked;
+    $('aiOwnFields').hidden = !own;
+    const id = store.get('llm_model_id', '');
+    $('aiSaved').hidden = !id; $('aiForm').hidden = !!id;
+    $('aiSavedName').textContent = store.get('llm_model_name', '');
+  }
+  function aiModels() {
+    const p = $('aiProvider').value;
+    const mine = catalog.filter(m => m.model.startsWith(p + '/'));
+    $('aiModel').innerHTML = mine.map(m => `<option value="${esc(m.model)}">${esc(m.name)}</option>`).join('') || '<option value="">(no models listed)</option>';
+  }
+  async function loadAiAccounts() {
+    const q = '?nova_url=' + encodeURIComponent($('novaUrl').value.trim());
+    try {
+      const [acc, cat] = await Promise.all([api('/api/nova/llm-models' + q), api('/api/nova/model-catalog' + q)]);
+      catalog = cat.models || [];
+      const def = (acc.models || []).find(m => m.id === acc.default_id);
+      $('aiHostNote').textContent = def ? `Currently ${def.name}${def.auth_mode === 'browser' ? ' (signed in)' : ''}.` : 'Nova has no default model yet; add one in Nova or bring your own key.';
+      const saved = store.get('llm_model_id', '');
+      if (saved && !(acc.models || []).some(m => m.id === saved)) { store.set('llm_model_id', ''); store.set('llm_model_name', ''); $('aiHost').checked = true; }
+    } catch (e) { $('aiHostNote').textContent = ''; }
+    aiModels(); aiRender();
+  }
+  $('aiProvider').addEventListener('change', aiModels);
+  for (const id of ['aiHost', 'aiOwn']) $(id).addEventListener('change', () => { store.set('ai_mode', $('aiOwn').checked ? 'own' : 'host'); aiRender(); });
+  $('aiSave').onclick = async () => {
+    $('aiError').textContent = '';
+    const model = $('aiModel').value, key = $('aiKey').value.trim();
+    if (!model || !key) { $('aiError').textContent = 'Pick a model and paste a key.'; return; }
+    $('aiSave').disabled = true;
+    try {
+      const name = `${model.split('/').slice(1).join('/')} (own key)`;
+      const r = await api('/api/nova/llm-models?nova_url=' + encodeURIComponent($('novaUrl').value.trim()), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, api_key: key, name }) });
+      store.set('llm_model_id', r.id); store.set('llm_model_name', name); $('aiKey').value = ''; aiRender();
+    } catch (e) { $('aiError').textContent = e.message; }
+    finally { $('aiSave').disabled = false; }
+  };
+  $('aiForget').onclick = async () => {
+    const id = store.get('llm_model_id', '');
+    if (id) { try { await api('/api/nova/llm-models/' + encodeURIComponent(id) + '/delete?nova_url=' + encodeURIComponent($('novaUrl').value.trim()), { method: 'POST' }); } catch {} }
+    store.set('llm_model_id', ''); store.set('llm_model_name', ''); aiRender();
+  };
   const priceFields = [['blConsumerKey', 'bl_consumer_key'], ['blConsumerSecret', 'bl_consumer_secret'], ['blToken', 'bl_token'], ['blTokenSecret', 'bl_token_secret'],
     ['priceRegion', 'price_region'], ['priceCurrency', 'price_currency'], ['priceCondition', 'price_condition'], ['priceGuide', 'price_guide']];
   const blCreds = () => ({ consumer_key: $('blConsumerKey').value.trim(), consumer_secret: $('blConsumerSecret').value.trim(),
@@ -584,6 +670,7 @@ ul.history button:hover b { text-decoration: underline; }
       nova_url: $('novaUrl').value.trim(), nova_db: $('novaDb').value.trim(), ldraw_dir: $('ldrawDir').value.trim(),
       rounds: Number($('rounds').value) || 3, rebrickable_key: $('rebrickableKey').value.trim(),
       owned_text: $('ownedText').value.trim(), rebrickable_user_token: store.get('rebrickable_user_token', ''),
+      llm_model_id: $('aiOwn').checked ? store.get('llm_model_id', '') : '',
       bricklink: flags.prices && blComplete() ? blCreds() : null, price_region: $('priceRegion').value, price_currency: $('priceCurrency').value.trim().toUpperCase(),
       price_condition: $('priceCondition').value, price_guide: $('priceGuide').value,
     };

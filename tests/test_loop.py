@@ -48,6 +48,7 @@ class FakeNova:
         self.approvals = []
         self.running = False
         self.pending_approval = None
+        self.llm_entries = {"host": {"model_name": "Chris's Claude", "model": "anthropic/claude-sonnet-5", "key": "host"}}
 
     def __call__(self, req):
         from urllib.parse import urlsplit
@@ -59,9 +60,27 @@ class FakeNova:
             return self.json({"chats": list(self.chats.values())})
         if path == "/api/chats" and method == "POST":
             cid = f"new-{len(self.chats)}"
-            self.chats[cid] = {"id": cid, "title": "New chat", "updated_at": 9.0, "created_at": 9.0}
+            self.chats[cid] = {"id": cid, "title": "New chat", "updated_at": 9.0, "created_at": 9.0,
+                               "llm_model_id": (body or {}).get("llm_model_id")}
             self.models[cid] = []
             return self.json(self.chats[cid])
+        if path == "/api/llm-models" and method == "GET":
+            return self.json({"models": [{"id": i, "model_name": e["model_name"], "auth_mode": "api_key",
+                                          "litellm_params": {"model": e["model"], "api_key": "***"}}
+                                         for i, e in self.llm_entries.items()],
+                              "default_id": "host"})
+        if path == "/api/llm-models" and method == "POST":
+            assert body["litellm_params"]["api_key"], "a key is required"
+            eid = f"e{len(self.llm_entries)}"
+            self.llm_entries[eid] = {"model_name": body.get("model_name"), "model": body["litellm_params"]["model"],
+                                     "key": body["litellm_params"]["api_key"]}
+            return self.json({"id": eid, "model_name": body.get("model_name"),
+                              "litellm_params": {"model": body["litellm_params"]["model"], "api_key": "***"}})
+        if path.startswith("/api/llm-models/") and method == "DELETE":
+            return self.json({"deleted": bool(self.llm_entries.pop(path.rsplit("/", 1)[1], None))})
+        if path == "/api/model-catalog":
+            return self.json({"models": [{"model": "anthropic/claude-sonnet-5", "display_name": "Claude Sonnet 5"},
+                                         {"model": "openai/gpt-6-luna", "display_name": "GPT-6 Luna"}]})
         if path == "/api/models":
             return self.json({"models": [dict(m, gallery=False) for ms in self.models.values() for m in ms],
                               "pending": 0})

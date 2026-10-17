@@ -189,13 +189,35 @@ class Client:
 
     def send(
         self, chat_id: str, text: str, documents: list[Path] = (),
-        options: dict | None = None,
+        options: dict | None = None, llm_model_id: str | None = None,
     ) -> None:
-        self._request("POST", f"/api/chats/{chat_id}/messages", {
+        body = {
             "text": text,
             "documents": [document_payload(p) for p in documents],
             "options": options or {},
-        })
+        }
+        if llm_model_id:
+            body["llm_model_id"] = llm_model_id
+        self._request("POST", f"/api/chats/{chat_id}/messages", body)
+
+    # -- AI accounts (Nova's configured models, each with its own key) -------
+
+    def llm_models(self) -> dict:
+        """{"models": [...public entries, keys masked...], "default_id": ...}."""
+        body = self._request("GET", "/api/llm-models")
+        return {"models": body.get("models", []), "default_id": body.get("default_id")}
+
+    def model_catalog(self) -> list[dict]:
+        return self._request("GET", "/api/model-catalog").get("models", [])
+
+    def add_llm_model(self, model: str, api_key: str, name: str) -> dict:
+        """Register a model + key in Nova. Nova keeps the key in its own
+        config store; this client never logs or returns it."""
+        return self._request("POST", "/api/llm-models", {
+            "model_name": name, "litellm_params": {"model": model, "api_key": api_key}})
+
+    def delete_llm_model(self, entry_id: str) -> None:
+        self._request("DELETE", f"/api/llm-models/{urllib.parse.quote(entry_id, safe='')}")
 
     def approve(self, chat_id: str, approval_id: str) -> None:
         self._request("POST", f"/api/chats/{chat_id}/approvals/{approval_id}", {"approved": True})

@@ -43,6 +43,14 @@ localhost only.
 
 The command line below does the same things one step at a time.
 
+### Whose AI account runs the agent
+
+Settings > AI account on the page: "Use the host's account" (Nova's default
+model entry) or "Use my own key" — pick a provider and model, paste a key,
+and brickpipe registers it in Nova as a model entry of its own; that
+person's runs are then billed to their key. The key goes once to Nova,
+which keeps it in its settings store; brickpipe keeps only the entry's id.
+
 ### Hosting it for other people
 
 [docs/hosting.md](docs/hosting.md): Nova, brickpipe and a Cloudflare tunnel
