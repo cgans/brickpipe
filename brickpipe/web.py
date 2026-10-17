@@ -72,6 +72,7 @@ class Run:
     activity: list[dict] = field(default_factory=list)  # tool calls, newest last
     tools_running: dict = field(default_factory=dict)
     events_seen: int = 0
+    design_tokens: dict | None = None  # Nova's token totals for the design turn
     stop_requested: bool = False
     subscribers: list[queue.Queue] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -90,6 +91,7 @@ class Run:
             "finished_at": self.finished_at, "log": self.log[-300:], "request": req,
             "agent_text": self.agent_text[-8000:], "events_seen": self.events_seen,
             "activity": self.activity[-60:],
+            "design_tokens": self.design_tokens,
             "files": sorted(p.name for p in self.final_dir().iterdir()) if self.final_dir() else [],
         }
 
@@ -136,7 +138,26 @@ def round_dict(rnd: loop.Round) -> dict:
                    errors=rnd.result.errors, warnings=rnd.result.warnings,
                    clean=not rnd.result.feedback)
     if rnd.turn:
-        out.update(agent_seconds=int(rnd.turn.seconds), agent_error=rnd.turn.error)
+        out.update(agent_seconds=int(rnd.turn.seconds), agent_error=rnd.turn.error,
+                   tokens=tokens_dict(rnd.turn.usage))
+    return out
+
+
+def tokens_dict(usage: dict | None) -> dict | None:
+    """The part of Nova's usage totals the page shows."""
+    if not usage:
+        return None
+    return {k: usage.get(k) for k in ("input", "output", "cache_read", "cache_write", "steps", "cost_usd", "model")}
+
+
+def tokens_sum(parts: list[dict | None]) -> dict | None:
+    parts = [p for p in parts if p]
+    if not parts:
+        return None
+    out = {k: sum(int(p.get(k) or 0) for p in parts) for k in ("input", "output", "cache_read", "cache_write", "steps")}
+    costs = [p.get("cost_usd") for p in parts if p.get("cost_usd") is not None]
+    out["cost_usd"] = round(sum(costs), 4) if costs else None
+    out["turns"] = len(parts)
     return out
 
 
@@ -298,6 +319,7 @@ class Runner:
                 "owned": last.result.owned if last else None,
                 "price": last.result.price if last else None,
                 "connectivity": last.result.connectivity if last else None,
+                "tokens": tokens_sum([run.design_tokens, *(r.get("tokens") for r in run.rounds)]),
             }
             run.status = "stopped" if run.stop_requested else "done"
             models = produced()  # snapshots may have finished rendering since
@@ -340,6 +362,7 @@ class Runner:
                     "Nova to see what it said."
                 )
             path = agent.download(produced[-1], models_dir)
+            run.design_tokens = tokens_dict(turn.usage)
             run.note(f"Nova delivered {path.name} in {int(turn.seconds)} s")
             return path, chat["id"]
 

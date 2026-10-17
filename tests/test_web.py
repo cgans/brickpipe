@@ -75,6 +75,9 @@ class WebTests(unittest.TestCase):
         self.assertTrue(run["result"]["clean"])
         self.assertEqual([r["errors"] for r in run["rounds"]], [1, 0])
         self.assertEqual(run["chat_url"], "http://localhost:8765/chat/20261014-220000-abc123")
+        self.assertEqual(run["rounds"][0]["tokens"]["input"], 41000)  # from Nova's usage event
+        self.assertEqual(run["result"]["tokens"], {"input": 41000, "output": 400, "cache_read": 19000,
+                                                   "cache_write": 2000, "steps": 2, "cost_usd": 0.12, "turns": 1})
         self.assertIn("bricklink_wanted.xml", run["files"])
         self.assertFalse(run["request"]["availability"])
         self.assertNotIn("rebrickable_key", run["request"])
@@ -91,6 +94,8 @@ class WebTests(unittest.TestCase):
         self.assertEqual(len(self.fake.chats), chats_before + 1)
         first = self.fake.messages[-2]  # the design message, then the repair
         self.assertTrue(first["text"].startswith("a shed"))
+        self.assertEqual(run["design_tokens"]["input"], 41000)
+        self.assertEqual(run["result"]["tokens"]["turns"], 2)  # design turn + one repair
         self.assertIn("checked for parts that cannot be bought", first["text"])
 
     def test_bricklink_secrets_stay_out_of_state_and_api(self):

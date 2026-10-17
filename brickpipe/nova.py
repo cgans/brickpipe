@@ -54,6 +54,7 @@ class Turn:
     error: str | None = None
     approvals: int = 0
     seconds: float = 0.0
+    usage: dict | None = None  # Nova's token totals for the turn, when it reports them
 
 
 def document_payload(path: Path) -> dict:
@@ -259,6 +260,8 @@ class Client:
                     turn.approvals += 1
                 elif event == "turn_error":
                     turn.error = data.get("message", "unknown error")
+                elif event == "usage" and isinstance(data.get("total"), dict):
+                    turn.usage = data["total"]
                 elif event == "done":
                     turn.finished = True
                     turn.seconds = time.monotonic() - started

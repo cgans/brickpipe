@@ -688,8 +688,8 @@ ul.history button:hover b { text-decoration: underline; }
       o.className = 'outcome ' + (run.status === 'failed' ? 'failed' : clean ? 'clean' : 'stopped');
       o.innerHTML = run.status === 'failed'
         ? `<b>The run failed.</b> ${esc(run.error || '')}`
-        : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.` + ownedLine(run) + priceLine(run) + connectivityLine(run) + viewerBox(run)
-        : `<b>Stopped before the model was clean.</b> ${esc(run.result ? run.result.reason : '')} The files below are for the last model checked.` + ownedLine(run) + priceLine(run) + connectivityLine(run);
+        : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.` + ownedLine(run) + priceLine(run) + connectivityLine(run) + tokensLine(run) + viewerBox(run)
+        : `<b>Stopped before the model was clean.</b> ${esc(run.result ? run.result.reason : '')} The files below are for the last model checked.` + ownedLine(run) + priceLine(run) + connectivityLine(run) + tokensLine(run);
     } else { o.hidden = true; }
     wireViewer(run);
 
@@ -748,6 +748,12 @@ ul.history button:hover b { text-decoration: underline; }
       <iframe class="viewer-frame" src="${esc(src)}" title="Nova's 3D viewer" loading="lazy" allow="xr-spatial-tracking; fullscreen"></iframe>
     </div>`;
   }
+  function tokensLine(run) {
+    const t = run.result && run.result.tokens;
+    if (!t || !t.input) return '';
+    const design = run.design_tokens && run.design_tokens.input ? ` Design: ${esc(tokensText(run.design_tokens))}.` : '';
+    return `<p style="margin-top:8px" class="muted small">Tokens: ${esc(tokensText(t))} over ${t.turns} agent turn${t.turns === 1 ? '' : 's'} and ${t.steps} step${t.steps === 1 ? '' : 's'}.${design}</p>`;
+  }
   function connectivityLine(run) {
     const c = run.result && run.result.connectivity;
     if (!c) return '';
@@ -788,9 +794,15 @@ ul.history button:hover b { text-decoration: underline; }
     for (let i = 0; i < n; i++) html += `<span class="stud ${i < r.errors ? 'bad' : 'warn'}"></span>`;
     return `<span class="studs" title="${r.errors} error(s), ${r.warnings} warning(s)">${html}${total > 24 ? '<span class="small muted">+' + (total - 24) + '</span>' : ''}</span>`;
   }
+  const k = n => n >= 10000 ? (n / 1000).toFixed(0) + 'k' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+  function tokensText(t) {
+    if (!t || !t.input) return '';
+    const cached = t.cache_read ? ` (${Math.round(100 * t.cache_read / t.input)}% cached)` : '';
+    return `${k(t.input)} in${cached}, ${k(t.output)} out` + (t.cost_usd ? `, ~$${Number(t.cost_usd).toFixed(2)}` : '');
+  }
   function agentCell(r, run) {
     if (r.agent_error) return '<span class="err">' + esc(r.agent_error) + '</span>';
-    if (r.agent_seconds != null) return 'repaired in ' + r.agent_seconds + ' s';
+    if (r.agent_seconds != null) return 'repaired in ' + r.agent_seconds + ' s' + (tokensText(r.tokens) ? `<br><span class="muted">${esc(tokensText(r.tokens))}</span>` : '');
     if (r.sent) return 'working ' + duration((Date.now() / 1000) - (r.sent_at || run.started_at)) + '…';
     if (r.clean) return 'nothing to fix';
     return r.errors == null ? '' : 'not sent';
