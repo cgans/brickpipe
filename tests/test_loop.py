@@ -108,6 +108,9 @@ class FakeNova:
                 "id": f"m{n}", "name": f"v{n}", "file": f"v{n}.mpd",
                 "model_url": f"/files/generated/v{n}.mpd?v={n}",
                 "created_at": 10.0 ** 12, "parts": 2 if self.repairs else 3})
+        events.append(("usage", {"step": {"input": 1000, "output": 10, "cache_read": 0, "cache_write": 0},
+                                 "total": {"input": 41000, "output": 400, "cache_read": 19000, "cache_write": 2000,
+                                           "steps": 2, "cost_usd": 0.12, "model": "fake"}}))
         events.append(("done", {}))
         self.running = False
         return self.sse(events)
