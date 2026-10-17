@@ -67,8 +67,13 @@ class Client:
         self,
         base_url: str = DEFAULT_URL,
         opener: Callable[[urllib.request.Request], object] | None = None,
+        public_url: str | None = None,
     ):
+        """`public_url` is the address browsers should use for links into Nova
+        when it differs from `base_url` (a hosted setup where brickpipe talks
+        to Nova over an internal network)."""
         self.base_url = base_url.rstrip("/")
+        self.public_url = (public_url or '').rstrip('/') or None
         self._open = opener or (lambda req: urllib.request.urlopen(req, timeout=60))
 
     # -- transport ---------------------------------------------------------
@@ -130,13 +135,16 @@ class Client:
         return self._request("GET", "/api/models").get("models", [])
 
     def chat_url(self, chat_id: str) -> str:
-        return f"{self.base_url}/chat/{chat_id}"
+        return f"{self.public_url or self.base_url}/chat/{chat_id}"
 
     def absolute(self, url: str | None) -> str | None:
-        """A URL Nova returned (usually server-relative) made absolute."""
+        """A URL Nova returned (usually server-relative) made absolute, for a
+        browser to open."""
         if not url:
             return None
-        return url if url.startswith("http") else self.base_url + url
+        if url.startswith("http"):
+            return url
+        return (self.public_url or self.base_url) + url
 
     def latest_images(self, chat_id: str, limit: int = 4) -> list[str]:
         """Images attached to the chat's most recent messages (the agent's renders)."""

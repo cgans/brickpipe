@@ -318,14 +318,17 @@ ul.history button:hover b { text-decoration: underline; }
     <div class="panel stack">
       <h2>Nova</h2>
       <p class="small muted">The LDraw Nova app that designs the models, and its part database.</p>
-      <div>
-        <label for="novaUrl">Nova web app</label>
-        <input id="novaUrl" type="text">
-      </div>
-      <div>
-        <label for="novaDb">Nova database (ldraw-info.db)</label>
-        <input id="novaDb" type="text" placeholder="C:\…\ldraw-nova\data\ldraw-info.db">
-        <p class="small muted">Gives part names and sizes in the report, and connector data for the clip-together check.</p>
+      <p class="small" id="lockedNote" hidden>This brickpipe is hosted: where Nova and the part libraries live is set on the server. You only choose what goes into each run.</p>
+      <div id="novaFields">
+        <div>
+          <label for="novaUrl">Nova web app</label>
+          <input id="novaUrl" type="text">
+        </div>
+        <div style="margin-top:14px">
+          <label for="novaDb">Nova database (ldraw-info.db)</label>
+          <input id="novaDb" type="text" placeholder="C:\…\ldraw-nova\data\ldraw-info.db">
+          <p class="small muted">Gives part names and sizes in the report, and connector data for the clip-together check.</p>
+        </div>
       </div>
       <div>
         <label for="rounds">Most repair rounds</label>
@@ -340,9 +343,9 @@ ul.history button:hover b { text-decoration: underline; }
       <div>
         <label for="rebrickableKey">Rebrickable API key</label>
         <input id="rebrickableKey" type="password" autocomplete="off" placeholder="Needed to check that parts exist in each colour">
-        <p class="small muted">Free from rebrickable.com under Account, Settings, API. Also needed to sign in to your collection.</p>
+        <p class="small muted" id="keyNote">Free from rebrickable.com under Account, Settings, API. Also needed to sign in to your collection.</p>
       </div>
-      <div>
+      <div id="ldrawFields">
         <label for="ldrawDir">LDraw part library</label>
         <input id="ldrawDir" type="text" placeholder="complete.zip, or a folder with parts\ and p\">
         <p class="small muted">With Nova's database, enables the check that pieces actually clip together.</p>
@@ -441,8 +444,8 @@ ul.history button:hover b { text-decoration: underline; }
   // what the current settings leave out, shown under the run button
   function settingsHint() {
     const missing = [];
-    if (!$('rebrickableKey').value.trim()) missing.push('no Rebrickable key, so colours are not checked against real parts');
-    if (!$('ldrawDir').value.trim()) missing.push('no LDraw library, so stud connections are not checked');
+    if (!$('rebrickableKey').value.trim() && !serverKey) missing.push('no Rebrickable key, so colours are not checked against real parts');
+    if (!$('ldrawDir').value.trim() && !hosted) missing.push('no LDraw library, so stud connections are not checked');
     if (flags.prices && !blComplete()) missing.push(Object.values(blCreds()).some(Boolean) ? 'BrickLink needs all four values, so no price estimate' : 'no BrickLink keys, so no price estimate');
     $('settingsHint').hidden = !missing.length;
     $('settingsHint').innerHTML = missing.length ? esc(missing.join('; ')) + '. <button type="button" id="hintSettings">Open Settings</button>' : '';
@@ -461,12 +464,18 @@ ul.history button:hover b { text-decoration: underline; }
     $('ldrawGet').hidden = !!$('ldrawDir').value;
     $('rounds').value = store.get('rounds', '') || s.rounds;
     $('rebrickableKey').value = store.get('rebrickable_key', '');
+    hosted = !!s.locked; serverKey = !!s.has_server_key;
+    $('lockedNote').hidden = !hosted;
+    $('novaFields').hidden = hosted;
+    $('ldrawFields').hidden = hosted;
+    if (hosted && serverKey) $('keyNote').textContent = 'The server already has a key, so this is optional: add your own only to sign in to your Rebrickable collection below under Build.';
+    if (hosted) { $('novaUrl').value = s.nova_url; $('novaDb').value = s.nova_db; $('ldrawDir').value = s.ldraw_dir || ''; }
     $('ownedText').value = store.get('owned_text', '');
     for (const [id, key] of priceFields) { const v = store.get(key, ''); if (v) $(id).value = v; }
     rbRender();
     settingsHint();
   }
-  let flags = {};
+  let flags = {}, hosted = false, serverKey = false;
   const priceFields = [['blConsumerKey', 'bl_consumer_key'], ['blConsumerSecret', 'bl_consumer_secret'], ['blToken', 'bl_token'], ['blTokenSecret', 'bl_token_secret'],
     ['priceRegion', 'price_region'], ['priceCurrency', 'price_currency'], ['priceCondition', 'price_condition'], ['priceGuide', 'price_guide']];
   const blCreds = () => ({ consumer_key: $('blConsumerKey').value.trim(), consumer_secret: $('blConsumerSecret').value.trim(),
@@ -482,7 +491,7 @@ ul.history button:hover b { text-decoration: underline; }
   }
   $('rbLogin').onclick = async () => {
     $('rbError').textContent = '';
-    if (!$('rebrickableKey').value.trim()) { $('rbError').textContent = 'Put your Rebrickable API key in Settings first.'; showView('settings'); return; }
+    if (!$('rebrickableKey').value.trim() && !serverKey) { $('rbError').textContent = 'Put your Rebrickable API key in Settings first.'; showView('settings'); return; }
     $('rbLogin').disabled = true;
     try {
       const r = await api('/api/rebrickable/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -557,7 +566,7 @@ ul.history button:hover b { text-decoration: underline; }
       $('novaState').textContent = `Nova is up: ${m.models.length} model(s), ${c.chats.length} chat(s)`;
       $('novaState').classList.remove('err');
     } catch (e) {
-      $('novaState').textContent = 'Nova is not reachable at ' + $('novaUrl').value + '. Start it with docker compose up -d.';
+      $('novaState').textContent = hosted ? 'Nova is not reachable right now; try again in a minute.' : 'Nova is not reachable at ' + $('novaUrl').value + '. Start it with docker compose up -d.';
       $('novaState').classList.add('err');
       $('modelFile').innerHTML = '<option value="">Nova is not reachable</option>';
     }

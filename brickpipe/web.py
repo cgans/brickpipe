@@ -12,6 +12,7 @@ server holds it in memory for that run only and never writes it to disk.
 from __future__ import annotations
 
 import json
+import os
 import mimetypes
 import queue
 import re
@@ -122,8 +123,9 @@ def viewer_urls(agent: nova.Client, model: nova.ProducedModel | None) -> dict:
         return {}
     query = "model=" + urllib.parse.quote(model.url, safe="") + (
         f"&parts={model.parts}" if model.parts is not None else "")
-    return {"viewer": f"{agent.base_url}/viewer/viewer.html?{query}",
-            "player": f"{agent.base_url}/viewer/player.html?{query}"}
+    base = agent.public_url or agent.base_url
+    return {"viewer": f"{base}/viewer/viewer.html?{query}",
+            "player": f"{base}/viewer/player.html?{query}"}
 
 
 def round_dict(rnd: loop.Round) -> dict:
@@ -139,8 +141,9 @@ def round_dict(rnd: loop.Round) -> dict:
 
 
 class Runner:
-    def __init__(self, runs_dir: Path):
+    def __init__(self, runs_dir: Path, settings: dict | None = None):
         self.runs_dir = runs_dir
+        self.settings = settings or {}
         self.runs: dict[str, Run] = {}
         self.runs_dir.mkdir(parents=True, exist_ok=True)
         for state in sorted(self.runs_dir.glob("*/state.json")):
@@ -167,8 +170,15 @@ class Runner:
 
     def _execute(self, run: Run) -> None:
         req = run.request
-        agent = nova.Client(req.get("nova_url") or nova.DEFAULT_URL)
-        key = req.get("rebrickable_key") or ""
+        cfg = self.settings
+        if cfg.get("locked"):
+            # Hosted: the server decides where Nova and the libraries are; the
+            # browser's values are ignored so nobody can point it elsewhere.
+            req["nova_url"], req["nova_db"], req["ldraw_dir"] = cfg["nova_url"], cfg["nova_db"], cfg.get("ldraw_dir") or ""
+        agent = nova.Client(req.get("nova_url") or nova.DEFAULT_URL, public_url=cfg.get("nova_public_url"))
+        key = req.get("rebrickable_key") or cfg.get("rebrickable_key") or ""
+        if key and not req.get("rebrickable_key"):
+            req["rebrickable_key"] = key  # the server's key; public() never shows it
         owned = inventory.from_text(req["owned_text"], load_colours()) if req.get("owned_text") else None
         user_token = (req.get("rebrickable_user_token") or "").strip() or None
         client = rebrickable.Client(key=key, cache_dir=rebrickable.default_cache_dir()) if key else None
@@ -429,7 +439,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/settings":
             found = connectivity.find_ldraw_library()
-            return self.send_json({**self.settings, "ldraw_dir": str(found or ""),
+            shown = {k: v for k, v in self.settings.items() if k != "rebrickable_key"}
+            shown["has_server_key"] = bool(self.settings.get("rebrickable_key"))
+            return self.send_json({**shown, "ldraw_dir": str(found or ""),
                                    "ldraw_download": self.ldraw_download,
                                    "features": features.all_flags()})
         if path == "/api/runs":
@@ -464,7 +476,7 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/rebrickable/login":
             body = self.read_json()
             try:
-                client = rebrickable.Client(key=body.get("api_key") or "")
+                client = rebrickable.Client(key=body.get("api_key") or self.settings.get("rebrickable_key") or "")
                 token = client.sign_in(body.get("username") or "", body.get("password") or "")
             except rebrickable.RebrickableError as err:
                 return self.send_json({"error": str(err)}, 400)
@@ -475,6 +487,8 @@ class Handler(BaseHTTPRequestHandler):
             body = self.read_json()
             if not (body.get("prompt") or body.get("chat_id") or body.get("model_file")):
                 return self.send_json({"error": "Give a prompt, or pick a model or chat."}, 400)
+            if self.settings.get("locked"):
+                body.pop("rebrickable_key", None) if self.settings.get("rebrickable_key") else None
             run = self.runner.start(body)
             return self.send_json(run.public(), 202)
         m = re.fullmatch(r"/api/runs/([\w-]+)/stop", path)
@@ -509,8 +523,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def proxy_nova(self, fn):
         nova_url = parse_qs(urlparse(self.path).query).get("nova_url", [nova.DEFAULT_URL])[0]
+        if self.settings.get("locked"):
+            nova_url = self.settings["nova_url"]
         try:
-            return self.send_json(fn(nova.Client(nova_url)))
+            return self.send_json(fn(nova.Client(nova_url, public_url=self.settings.get("nova_public_url"))))
         except nova.NovaError as err:
             return self.send_json({"error": str(err)}, 502)
 
@@ -567,36 +583,64 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def make_server(port: int = DEFAULT_PORT, runs_dir: Path | None = None,
-                nova_url: str = nova.DEFAULT_URL, nova_db: str | None = None) -> ThreadingHTTPServer:
+                nova_url: str = nova.DEFAULT_URL, nova_db: str | None = None,
+                host: str = "127.0.0.1", nova_public_url: str | None = None,
+                locked: bool = False, rebrickable_key: str | None = None) -> ThreadingHTTPServer:
+    """`host` 0.0.0.0 makes the page reachable from other machines; combine it
+    with `locked` so the server's Nova and library settings cannot be changed
+    from a browser, and `nova_public_url` for the address browsers use to
+    reach Nova when it differs from `nova_url`."""
     here = Path.cwd()
     handler = type("BoundHandler", (Handler,), {})
-    handler.runner = Runner(runs_dir or here / "runs")
     from . import __version__
     handler.settings = {
         "version": __version__,
         "nova_url": nova_url,
+        "nova_public_url": (nova_public_url or "").rstrip("/") or None,
         "nova_db": nova_db if nova_db is not None else guess_nova_db(here),
         "ldraw_dir": str(connectivity.find_ldraw_library() or ""),
         "rounds": 3,
+        "locked": bool(locked),
+        "rebrickable_key": rebrickable_key or None,
     }
+    handler.runner = Runner(runs_dir or here / "runs", handler.settings)
     handler.page = resources.files("brickpipe").joinpath("web/index.html").read_bytes()
-    return ThreadingHTTPServer(("127.0.0.1", port), handler)
+    return ThreadingHTTPServer((host, port), handler)
 
 
 def main(argv: list[str] | None = None) -> int:
     import argparse
     import webbrowser
 
+    env = os.environ.get
     parser = argparse.ArgumentParser(prog="brickpipe.web", description=__doc__.split("\n")[0])
-    parser.add_argument("--port", type=int, default=DEFAULT_PORT)
-    parser.add_argument("--nova-url", default=nova.DEFAULT_URL)
-    parser.add_argument("--nova-db", default=None, help="path to Nova's data/ldraw-info.db")
-    parser.add_argument("--runs-dir", type=Path, default=None, help="where runs are kept (default ./runs)")
-    parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--port", type=int, default=int(env("BRICKPIPE_PORT") or DEFAULT_PORT))
+    parser.add_argument("--host", default=env("BRICKPIPE_HOST") or "127.0.0.1",
+                        help="address to listen on; 0.0.0.0 for other machines (default: this machine only)")
+    parser.add_argument("--nova-url", default=env("BRICKPIPE_NOVA_URL") or nova.DEFAULT_URL)
+    parser.add_argument("--nova-public-url", default=env("BRICKPIPE_NOVA_PUBLIC_URL") or None,
+                        help="address browsers use to open Nova, when it differs from --nova-url")
+    parser.add_argument("--nova-db", default=env("BRICKPIPE_NOVA_DB") or None, help="path to Nova's data/ldraw-info.db")
+    parser.add_argument("--runs-dir", type=Path, default=Path(env("BRICKPIPE_RUNS_DIR")) if env("BRICKPIPE_RUNS_DIR") else None,
+                        help="where runs are kept (default ./runs)")
+    parser.add_argument("--locked", action="store_true", default=env("BRICKPIPE_LOCKED", "").lower() in ("1", "true", "yes"),
+                        help="hosted mode: browsers cannot change the Nova or library settings")
+    parser.add_argument("--get-ldraw", action="store_true", default=env("BRICKPIPE_GET_LDRAW", "").lower() in ("1", "true", "yes"),
+                        help="download the LDraw library at start if none is found")
+    parser.add_argument("--no-browser", action="store_true", default=env("BRICKPIPE_NO_BROWSER", "").lower() in ("1", "true", "yes"))
     args = parser.parse_args(argv)
 
+    if args.get_ldraw and not connectivity.find_ldraw_library():
+        print("Downloading the LDraw part library (about 150 MB)…", flush=True)
+        try:
+            print(f"Saved {connectivity.download_library()}")
+        except OSError as err:
+            print(f"brickpipe: library download failed: {err}; the connectivity check stays off until it exists.")
+
     try:
-        server = make_server(args.port, args.runs_dir, args.nova_url, args.nova_db)
+        server = make_server(args.port, args.runs_dir, args.nova_url, args.nova_db, host=args.host,
+                             nova_public_url=args.nova_public_url, locked=args.locked,
+                             rebrickable_key=env(rebrickable.KEY_ENV))
     except OSError as err:
         print(f"brickpipe: could not listen on port {args.port} ({err}).\n"
               "Another brickpipe page is probably still running: close its window, "
@@ -604,7 +648,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     url = f"http://localhost:{args.port}"
     from . import __version__
-    print(f"brickpipe {__version__} is at {url}  (Ctrl+C to stop)")
+    print(f"brickpipe {__version__} is at {url}" + (f" (listening on {args.host})" if args.host != "127.0.0.1" else "")
+          + ("  [locked: hosted mode]" if args.locked else "") + "  (Ctrl+C to stop)")
     if not args.no_browser:
         webbrowser.open(url)
     try:
