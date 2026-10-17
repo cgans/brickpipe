@@ -50,7 +50,9 @@ class FakeNova:
         self.pending_approval = None
 
     def __call__(self, req):
-        path = req.full_url.split("localhost:8765", 1)[1]
+        from urllib.parse import urlsplit
+        parts = urlsplit(req.full_url)
+        path = parts.path + ("?" + parts.query if parts.query else "")
         method = req.get_method()
         body = json.loads(req.data) if req.data else None
         if path == "/api/chats" and method == "GET":

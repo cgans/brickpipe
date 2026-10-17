@@ -1,0 +1,3 @@
+"""brickpipe: from an LDraw model to a shopping list and build steps."""
+
+__version__ = "0.3.0"

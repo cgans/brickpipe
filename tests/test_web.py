@@ -28,8 +28,8 @@ class WebTests(unittest.TestCase):
         cls.fake = FakeNova()
         cls.original_init = nova.Client.__init__
 
-        def patched(self, base_url=nova.DEFAULT_URL, opener=None):
-            cls.original_init(self, base_url, cls.fake)
+        def patched(self, base_url=nova.DEFAULT_URL, opener=None, public_url=None):
+            cls.original_init(self, base_url, cls.fake, public_url)
         nova.Client.__init__ = patched
         cls.server = web.make_server(0, Path(cls.tmp.name) / "runs", nova_db="")
         cls.port = cls.server.server_address[1]
@@ -137,6 +137,58 @@ class WebTests(unittest.TestCase):
         self.assertGreaterEqual(len(body["runs"]), 1)
         starts = [r["started_at"] for r in body["runs"]]
         self.assertEqual(starts, sorted(starts, reverse=True))
+
+
+class HostedTests(unittest.TestCase):
+    """A locked server for family use: browsers cannot redirect it, links to
+    Nova use the public address, and the server's Rebrickable key is used."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.fake = FakeNova()
+        cls.original_init = nova.Client.__init__
+
+        def patched(self, base_url=nova.DEFAULT_URL, opener=None, public_url=None):
+            cls.seen_base = base_url
+            cls.original_init(self, base_url, cls.fake, public_url)
+        nova.Client.__init__ = patched
+        cls.server = web.make_server(0, Path(cls.tmp.name) / "runs", nova_url="http://ldraw-nova-app:8000",
+                                     nova_db="", host="127.0.0.1", nova_public_url="https://nova.example.test/",
+                                     locked=True, rebrickable_key="server-key")
+        cls.port = cls.server.server_address[1]
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        cls.base = f"http://127.0.0.1:{cls.port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        nova.Client.__init__ = cls.original_init
+        cls.tmp.cleanup()
+
+    def test_settings_show_lock_and_key_presence_only(self):
+        status, s = http("GET", f"{self.base}/api/settings")
+        self.assertTrue(s["locked"])
+        self.assertTrue(s["has_server_key"])
+        self.assertNotIn("rebrickable_key", s)
+        self.assertEqual(s["nova_public_url"], "https://nova.example.test")
+
+    def test_browser_cannot_redirect_a_locked_server(self):
+        http("GET", f"{self.base}/api/nova/chats?nova_url=http://evil.example.test")
+        self.assertEqual(self.seen_base, "http://ldraw-nova-app:8000")
+        status, run = http("POST", f"{self.base}/api/runs", {
+            "chat_id": "latest", "rounds": 0, "nova_url": "http://evil.example.test",
+            "nova_db": "/etc/passwd", "ldraw_dir": "/etc"})
+        for _ in range(100):
+            status, run = http("GET", f"{self.base}/api/runs/{run['id']}")
+            if run["status"] in ("done", "failed", "stopped"):
+                break
+            time.sleep(0.05)
+        self.assertEqual(run["status"], "done")
+        self.assertEqual(run["request"]["nova_url"], "http://ldraw-nova-app:8000")
+        self.assertEqual(run["request"]["nova_db"], "")
+        self.assertTrue(run["chat_url"].startswith("https://nova.example.test/chat/"))
+        self.assertTrue(run["request"]["availability"])  # the server's key was used
 
 
 if __name__ == "__main__":

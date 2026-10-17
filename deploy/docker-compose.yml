@@ -1,0 +1,72 @@
+# brickpipe + LDraw Nova + a Cloudflare tunnel, for a home server.
+#
+# Layout this file expects (three folders side by side):
+#   brickpipe/            this repo
+#   ldraw-nova/           git clone --branch v0.6.0 https://github.com/anteloc/ldraw-nova.git
+#   ldraw-nova-docker/    git clone --branch v0.6.0 https://github.com/anteloc/ldraw-nova-docker.git
+#
+# Run from the brickpipe folder:
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+#
+# Nothing here publishes a port to the network: the only way in is the
+# tunnel, and Cloudflare Access in front of it decides who gets through.
+# See docs/hosting.md.
+
+name: brickpipe
+
+services:
+  nova:
+    build:
+      context: ../../ldraw-nova-docker
+      additional_contexts:
+        nova: ../../ldraw-nova
+    image: ldraw-nova-app
+    container_name: ldraw-nova-app
+    init: true
+    restart: unless-stopped
+    volumes:
+      - ../../ldraw-nova-docker/data:/data
+      - nova-config:/config
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # Reachable on the server itself for a quick check; not from the LAN.
+    ports:
+      - "127.0.0.1:8765:8000"
+
+  brickpipe:
+    build:
+      context: ..
+    image: brickpipe
+    container_name: brickpipe
+    restart: unless-stopped
+    depends_on:
+      - nova
+    volumes:
+      - brickpipe-data:/data
+      # Nova's part database and the shadow library, read only.
+      - ../../ldraw-nova/data:/nova/data:ro
+    environment:
+      BRICKPIPE_NOVA_URL: http://nova:8000
+      BRICKPIPE_NOVA_PUBLIC_URL: https://${NOVA_HOSTNAME:?set NOVA_HOSTNAME in deploy/.env}
+      BRICKPIPE_NOVA_DB: /nova/data/ldraw-info.db
+      REBRICKABLE_API_KEY: ${REBRICKABLE_API_KEY:-}
+      BRICKPIPE_FEATURES: ${BRICKPIPE_FEATURES:-}
+    ports:
+      - "127.0.0.1:8766:8766"
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: brickpipe-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in deploy/.env}
+    depends_on:
+      - brickpipe
+
+volumes:
+  nova-config:
+  brickpipe-data:

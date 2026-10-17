@@ -1,0 +1,8 @@
+runs/
+out/
+*.mpd-brickpipe/
+.git/
+tests/
+docs/
+deploy/.env
+__pycache__/

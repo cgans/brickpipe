@@ -43,6 +43,17 @@ localhost only.
 
 The command line below does the same things one step at a time.
 
+### Hosting it for other people
+
+[docs/hosting.md](docs/hosting.md): Nova, brickpipe and a Cloudflare tunnel
+on a home server, with an email-code login in front. brickpipe runs *locked*
+there (`--locked`, or `BRICKPIPE_LOCKED=1`): the server decides where Nova
+and the libraries are, browsers only choose what goes into a run, and links
+into Nova use `--nova-public-url`. `--host 0.0.0.0` makes the page listen for
+other machines; every option has a `BRICKPIPE_*` environment variable for
+containers. A one-page picture of the whole flow is in
+[docs/workflow.md](docs/workflow.md).
+
 ## Run it
 
 ```

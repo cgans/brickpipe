@@ -1,0 +1,4 @@
+0 brickpipe shadow supplement for "Wheel Hole Notched over Cylinder"
+0 // Same shape as wpinhole.dat: a 1 LDU long radius-4 hole running from
+0 // y=0 to y=-1, scaled along Y by the part that uses it.
+0 !LDCAD SNAP_CYL [id=wpAxHole] [group=wpAxHole] [gender=F] [caps=none] [secs=R 4 1] [slide=true] [scale=YOnly]
