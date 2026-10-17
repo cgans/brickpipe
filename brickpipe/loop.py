@@ -55,6 +55,7 @@ def run(
     on_event: Callable[[str, dict], None] | None = None,
     on_round: Callable[[Round], None] | None = None,
     stop: Callable[[], bool] = lambda: False,
+    llm_model_id: str | None = None,
     **pipeline_options,
 ) -> LoopResult:
     """Run the loop. `on_event` sees Nova's raw agent events, `on_round` is
@@ -100,6 +101,7 @@ def run(
         agent.send(
             chat_id, MESSAGE, documents=[round_out / "feedback.md"],
             options={"mode": "agent", "permissions": "full" if approve_tools else "ask"},
+            llm_model_id=llm_model_id,
         )
         rnd.sent = True
         rnd.sent_at = sent_at

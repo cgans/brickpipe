@@ -53,6 +53,7 @@ services:
       BRICKPIPE_NOVA_PUBLIC_URL: https://${NOVA_HOSTNAME:?set NOVA_HOSTNAME in deploy/.env}
       BRICKPIPE_NOVA_DB: /nova/data/ldraw-info.db
       REBRICKABLE_API_KEY: ${REBRICKABLE_API_KEY:-}
+      BRICKPIPE_HOST_NAME: ${BRICKPIPE_HOST_NAME:-}
       BRICKPIPE_FEATURES: ${BRICKPIPE_FEATURES:-}
     ports:
       - "127.0.0.1:8766:8766"
