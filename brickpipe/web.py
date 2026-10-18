@@ -143,6 +143,22 @@ def round_dict(rnd: loop.Round) -> dict:
     return out
 
 
+EFFORTS = ("low", "medium", "high")
+
+
+def effort_of(req: dict) -> str | None:
+    """The agent effort a run asked for, or None for Nova's default."""
+    value = (req.get("effort") or "").strip().lower()
+    return value if value in EFFORTS else None
+
+
+def agent_options(req: dict) -> dict:
+    options = {"mode": "agent", "permissions": "full"}
+    if effort_of(req):
+        options["effort"] = effort_of(req)
+    return options
+
+
 def tokens_dict(usage: dict | None) -> dict | None:
     """The part of Nova's usage totals the page shows."""
     if not usage:
@@ -308,6 +324,7 @@ class Runner:
                 max_rounds=int(req.get("rounds") or 3), approve_tools=True,
                 log=run.note, on_event=on_event, on_round=on_round,
                 stop=lambda: run.stop_requested, llm_model_id=req.get("llm_model_id") or None,
+                effort=effort_of(req),
                 nova_db=nova_db, check_availability=bool(client), client=client,
                 owned=owned, owned_rebrickable_token=user_token if client else None,
                 ldraw_dir=ldraw_dir, pricer=pricer, price_options=price_options,
@@ -349,7 +366,7 @@ class Runner:
             run.note(f"Asked Nova to design: {req['prompt'][:120]}")
             run.agent_text = ""
             agent.send(chat["id"], req["prompt"] + DESIGN_MESSAGE_SUFFIX,
-                       options={"mode": "agent", "permissions": "full"},
+                       options=agent_options(req),
                        llm_model_id=req.get("llm_model_id") or None)
             set_status("designing", "The agent is designing the model")
             turn = agent.wait_for_turn(chat["id"], approve_tools=True, on_event=on_event,

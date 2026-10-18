@@ -335,6 +335,16 @@ ul.history button:hover b { text-decoration: underline; }
         <input id="rounds" type="number" min="0" max="10" value="3" style="width:6em">
         <p class="small muted">How many times brickpipe sends problems back to the agent before giving up.</p>
       </div>
+      <div>
+        <label for="effort">Agent effort</label>
+        <select id="effort" style="width:auto">
+          <option value="">Nova's default</option>
+          <option value="low">Low</option>
+          <option value="medium">Medium</option>
+          <option value="high">High</option>
+        </select>
+        <p class="small muted">How hard the agent thinks at each step. Lower uses far fewer tokens; check that designs still come out clean.</p>
+      </div>
     </div>
 
     <div class="panel stack" id="aiPanel">
@@ -500,6 +510,7 @@ ul.history button:hover b { text-decoration: underline; }
     $('ldrawDir').value = store.get('ldraw_dir', '') || s.ldraw_dir || '';
     $('ldrawGet').hidden = !!$('ldrawDir').value;
     $('rounds').value = store.get('rounds', '') || s.rounds;
+    $('effort').value = store.get('effort', '');
     $('rebrickableKey').value = store.get('rebrickable_key', '');
     hosted = !!s.locked; serverKey = !!s.has_server_key;
     hostName = s.host_name || '';
@@ -567,7 +578,7 @@ ul.history button:hover b { text-decoration: underline; }
   const blCreds = () => ({ consumer_key: $('blConsumerKey').value.trim(), consumer_secret: $('blConsumerSecret').value.trim(),
     token: $('blToken').value.trim(), token_secret: $('blTokenSecret').value.trim() });
   const blComplete = () => Object.values(blCreds()).every(Boolean);
-  for (const [id, key] of [['novaUrl', 'nova_url'], ['novaDb', 'nova_db'], ['ldrawDir', 'ldraw_dir'], ['rounds', 'rounds'], ['rebrickableKey', 'rebrickable_key'], ['ownedText', 'owned_text'], ...priceFields]) {
+  for (const [id, key] of [['novaUrl', 'nova_url'], ['novaDb', 'nova_db'], ['ldrawDir', 'ldraw_dir'], ['rounds', 'rounds'], ['effort', 'effort'], ['rebrickableKey', 'rebrickable_key'], ['ownedText', 'owned_text'], ...priceFields]) {
     $(id).addEventListener('change', () => { store.set(key, $(id).value.trim()); settingsHint(); });
   }
 
@@ -668,7 +679,7 @@ ul.history button:hover b { text-decoration: underline; }
     $('formError').textContent = '';
     const body = {
       nova_url: $('novaUrl').value.trim(), nova_db: $('novaDb').value.trim(), ldraw_dir: $('ldrawDir').value.trim(),
-      rounds: Number($('rounds').value) || 3, rebrickable_key: $('rebrickableKey').value.trim(),
+      rounds: Number($('rounds').value) || 3, effort: $('effort').value, rebrickable_key: $('rebrickableKey').value.trim(),
       owned_text: $('ownedText').value.trim(), rebrickable_user_token: store.get('rebrickable_user_token', ''),
       llm_model_id: $('aiOwn').checked ? store.get('llm_model_id', '') : '',
       bricklink: flags.prices && blComplete() ? blCreds() : null, price_region: $('priceRegion').value, price_currency: $('priceCurrency').value.trim().toUpperCase(),
