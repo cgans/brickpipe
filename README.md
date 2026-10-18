@@ -358,7 +358,9 @@ for instance; such pieces are judged by their studs alone).
    146 MB, for the clip-together check. Download now? / Not now"), using the
    download and progress code that already exists. Also note what else
    depends on it and what the user sees when it is missing.
-3. Recognise bricks you already have from a photo, confirmed by you before
+3. Optional TypeSafe (Jev) key in brickpipe's Settings, passed on to Nova,
+   for semantic part search; measure whether it saves steps first.
+4. Recognise bricks you already have from a photo, confirmed by you before
    they are subtracted.
 
 ## Notes for Nova
