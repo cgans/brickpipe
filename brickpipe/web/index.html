@@ -151,6 +151,9 @@ table.rounds th.num { text-align: right; }
 .stud.clean { background: var(--stud); border-color: var(--stud-edge); }
 .stud.pending { background: transparent; border-style: dashed; }
 
+.refine { margin-top: 16px; padding: 14px 16px; border: 1px dashed var(--line); border-radius: 8px; }
+.refine textarea { min-height: 70px; }
+tr.change td { background: var(--panel-2); font-size: .9rem; padding: 8px 10px; }
 .outcome { padding: 14px 16px; border-radius: 8px; background: var(--panel-2); margin-top: 16px; }
 .outcome.clean { border-left: 6px solid var(--stud); }
 .outcome.failed { border-left: 6px solid var(--bad); }
@@ -300,6 +303,15 @@ ul.history button:hover b { text-decoration: underline; }
       </table>
 
       <div id="outcome" hidden></div>
+      <div class="refine" id="refineBox" hidden>
+        <label for="refineText">Change something</label>
+        <textarea id="refineText" rows="3" placeholder="e.g. Make the seat blue and add a small front loader"></textarea>
+        <div class="row" style="margin-top:8px">
+          <button class="btn primary" id="refineBtn" type="button">Send to the agent</button>
+          <span class="small muted">Goes to the same Nova chat. The changed model is checked and repaired like the first one.</span>
+        </div>
+        <p class="err small" id="refineError"></p>
+      </div>
 
       <div id="results" hidden>
         <h3 style="margin-top:18px">Files for the final model</h3>
@@ -677,14 +689,7 @@ ul.history button:hover b { text-decoration: underline; }
   $('briefForm').addEventListener('submit', async e => {
     e.preventDefault();
     $('formError').textContent = '';
-    const body = {
-      nova_url: $('novaUrl').value.trim(), nova_db: $('novaDb').value.trim(), ldraw_dir: $('ldrawDir').value.trim(),
-      rounds: Number($('rounds').value) || 3, effort: $('effort').value, rebrickable_key: $('rebrickableKey').value.trim(),
-      owned_text: $('ownedText').value.trim(), rebrickable_user_token: store.get('rebrickable_user_token', ''),
-      llm_model_id: $('aiOwn').checked ? store.get('llm_model_id', '') : '',
-      bricklink: flags.prices && blComplete() ? blCreds() : null, price_region: $('priceRegion').value, price_currency: $('priceCurrency').value.trim().toUpperCase(),
-      price_condition: $('priceCondition').value, price_guide: $('priceGuide').value,
-    };
+    const body = runSettings();
     if ($('existing').open) {
       body.model_file = $('modelFile').value; body.chat_id = $('chatId').value || 'latest';
     } else {
@@ -770,14 +775,22 @@ ul.history button:hover b { text-decoration: underline; }
     renderAgent(run); renderActivity(run);
 
     $('roundsTable').hidden = !run.rounds.length;
-    $('roundsBody').innerHTML = run.rounds.map(r => `<tr>
+    const changeAt = {};
+    for (const c of run.refinements || []) if (c.first_round) changeAt[c.first_round] = c;
+    const pending = (run.refinements || []).filter(c => !c.first_round);
+    const changeRow = c => `<tr class="change"><td colspan="6"><b>Your change:</b> ${esc(c.text)}${
+      c.error ? ` <span class="err">— ${esc(c.error)}</span>`
+      : c.seconds != null ? ` <span class="muted">— made in ${c.seconds} s${tokensText(c.tokens) ? ', ' + esc(tokensText(c.tokens)) : ''}${c.model ? ', ' + esc(c.model) : ''}</span>`
+      : ' <span class="muted">— the agent is working on it…</span>'}</td></tr>`;
+    $('roundsBody').innerHTML = run.rounds.map(r => (changeAt[r.number] ? changeRow(changeAt[r.number]) : '') + `<tr>
       <td>${r.number}</td>
       <td class="small">${r.image ? `<img class="thumb" src="${esc(r.image)}" alt="">` : ''}${esc(r.model)}${r.viewer ? ` <button type="button" class="btn quiet small" data-view="${r.number}">3D</button>` : ''}</td>
       <td class="num">${r.pieces ?? ''}</td>
       <td class="num">${r.errors == null ? '' : r.errors + (r.warnings ? ' + ' + r.warnings + ' warning' + (r.warnings === 1 ? '' : 's') : '')}</td>
       <td>${studs(r)}</td>
       <td class="small">${agentCell(r, run)}</td>
-    </tr>`).join('');
+    </tr>`).join('') + pending.map(changeRow).join('');
+    $('refineBox').hidden = !(['done', 'stopped'].includes(run.status) && run.chat_id);
 
     const o = $('outcome');
     if (run.status === 'done' || run.status === 'stopped' || run.status === 'failed') {
@@ -807,6 +820,30 @@ ul.history button:hover b { text-decoration: underline; }
     if (stick && !box.classList.contains('all')) box.scrollTop = box.scrollHeight;
     $('agentAll').hidden = box.scrollHeight <= box.clientHeight && !box.classList.contains('all');
   }
+  // The settings every run (and every change to a run) is sent with.
+  function runSettings() {
+    return {
+      nova_url: $('novaUrl').value.trim(), nova_db: $('novaDb').value.trim(), ldraw_dir: $('ldrawDir').value.trim(),
+      rounds: Number($('rounds').value) || 3, effort: $('effort').value, rebrickable_key: $('rebrickableKey').value.trim(),
+      owned_text: $('ownedText').value.trim(), rebrickable_user_token: store.get('rebrickable_user_token', ''),
+      llm_model_id: $('aiOwn').checked ? store.get('llm_model_id', '') : '',
+      bricklink: flags.prices && blComplete() ? blCreds() : null, price_region: $('priceRegion').value, price_currency: $('priceCurrency').value.trim().toUpperCase(),
+      price_condition: $('priceCondition').value, price_guide: $('priceGuide').value,
+    };
+  }
+  $('refineBtn').onclick = async () => {
+    const text = $('refineText').value.trim();
+    $('refineError').textContent = '';
+    if (!text || !current) { $('refineError').textContent = 'Say what you would like changed.'; return; }
+    $('refineBtn').disabled = true;
+    try {
+      const run = await api('/api/runs/' + current.id + '/refine', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...runSettings(), text }) });
+      $('refineText').value = '';
+      show(run); loadHistory();
+    } catch (e) { $('refineError').textContent = e.message; }
+    finally { $('refineBtn').disabled = false; }
+  };
   $('agentAll').onclick = () => {
     const box = $('agentText');
     const all = box.classList.toggle('all');

@@ -57,6 +57,7 @@ def run(
     stop: Callable[[], bool] = lambda: False,
     llm_model_id: str | None = None,
     effort: str | None = None,
+    first_round: int = 1,
     **pipeline_options,
 ) -> LoopResult:
     """Run the loop. `on_event` sees Nova's raw agent events, `on_round` is
@@ -69,7 +70,9 @@ def run(
 
     outcome = LoopResult()
     current = Path(model)
-    for number in range(1, max_rounds + 2):  # one extra round only checks
+    # Round numbers carry on from `first_round` when a run is refined, so each
+    # round keeps its own round-N folder.
+    for number in range(first_round, first_round + max_rounds + 1):  # one extra round only checks
         rnd = Round(number, current)
         outcome.rounds.append(rnd)
         round_out = out / f"round-{number}"
@@ -88,7 +91,7 @@ def run(
             outcome.final_model = current
             outcome.stopped_because = "nothing left for the agent to fix"
             break
-        if number > max_rounds:
+        if number - first_round >= max_rounds:
             outcome.final_model = current
             outcome.stopped_because = f"reached the limit of {max_rounds} repair round(s)"
             break

@@ -58,6 +58,13 @@ elapsed timer, and a 3D view of each round's model. You can close the page
 and come back; runs keep going. Nothing here needs a terminal once it is
 set up.
 
+## Changing it afterwards
+
+A finished run is not the end. Under the outcome, "Change something" sends
+a follow-up to the same Nova chat ("make the roof blue"). The agent edits
+its own model, and brickpipe checks and repairs the new version in more
+rounds of the same run. Do it as many times as you like.
+
 ## Behind a flag
 
 A price estimate from BrickLink's price guide is built but off by default,
