@@ -41,6 +41,13 @@ DESIGN_MESSAGE_SUFFIX = (
     "for parts that cannot be bought and sent back to you to repair."
 )
 
+REFINE_MESSAGE_SUFFIX = (
+    "\n\nThis is a change to the model you delivered in this chat. Keep everything "
+    "else as it is. When the change is done, deliver the updated model as a new "
+    ".mpd version. It will be checked for parts that cannot be bought and sent back "
+    "to you to repair."
+)
+
 
 def guess_nova_db(start: Path) -> str:
     """Nova's database if the repos sit next to brickpipe, else empty."""
@@ -73,6 +80,7 @@ class Run:
     tools_running: dict = field(default_factory=dict)
     events_seen: int = 0
     design_tokens: dict | None = None  # Nova's token totals for the design turn
+    refinements: list = field(default_factory=list)  # changes the user asked for after a run
     stop_requested: bool = False
     subscribers: list[queue.Queue] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -92,6 +100,7 @@ class Run:
             "agent_text": self.agent_text[-8000:], "events_seen": self.events_seen,
             "activity": self.activity[-60:],
             "design_tokens": self.design_tokens,
+            "refinements": self.refinements,
             "files": sorted(p.name for p in self.final_dir().iterdir()) if self.final_dir() else [],
         }
 
@@ -190,12 +199,33 @@ class Runner:
                 continue
             run = Run(saved["id"], state.parent, saved.get("request", {}))
             for key in ("status", "phase", "chat_id", "chat_url", "rounds", "result",
-                        "error", "started_at", "finished_at", "log"):
+                        "error", "started_at", "finished_at", "log", "design_tokens", "refinements"):
                 if key in saved:
                     setattr(run, key, saved[key])
             if run.status not in ("done", "failed", "stopped"):
                 run.status, run.error = "failed", "brickpipe was restarted while this run was in progress"
             self.runs[run.id] = run
+
+    REFINABLE = ("done", "stopped")
+    RUN_SETTINGS = ("nova_url", "nova_db", "ldraw_dir", "rounds", "effort", "rebrickable_key",
+                    "rebrickable_user_token", "owned_text", "llm_model_id", "bricklink", "price_region",
+                    "price_currency", "price_condition", "price_guide")
+
+    def refine(self, run: Run, text: str, settings: dict | None = None) -> Run:
+        """Send a change request to the run's Nova chat, then check and repair
+        the model it delivers, carrying on the run's round numbering."""
+        if run.status not in self.REFINABLE or not run.chat_id:
+            raise ValueError("Only a finished run with a Nova chat can be changed.")
+        for key in self.RUN_SETTINGS:  # the page sends its current settings; keys are not kept on disk
+            if settings and key in settings:
+                run.request[key] = settings[key]
+        run.refinements.append({"text": text, "at": time.time(), "first_round": None,
+                                "seconds": None, "tokens": None, "model": None, "error": None})
+        run.status, run.error, run.finished_at, run.stop_requested = "designing", None, None, False
+        run.phase = "Sending your change to the agent"
+        run.save()
+        threading.Thread(target=self._execute, args=(run,), kwargs={"refine": text}, daemon=True).start()
+        return run
 
     def start(self, request: dict) -> Run:
         run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
@@ -205,7 +235,7 @@ class Runner:
         threading.Thread(target=self._execute, args=(run,), daemon=True).start()
         return run
 
-    def _execute(self, run: Run) -> None:
+    def _execute(self, run: Run, refine: str | None = None) -> None:
         req = run.request
         cfg = self.settings
         if cfg.get("locked"):
@@ -317,14 +347,20 @@ class Runner:
             run.emit("round", entry)
 
         try:
-            model, chat_id = self._starting_model(run, agent, set_status, on_event)
+            first_round = 1
+            if refine is not None:
+                model, chat_id = self._refined_model(run, agent, set_status, on_event, refine)
+                first_round = max((r["number"] for r in run.rounds), default=0) + 1
+                run.refinements[-1]["first_round"] = first_round
+            else:
+                model, chat_id = self._starting_model(run, agent, set_status, on_event)
             set_status("checking")
             outcome = loop.run(
                 agent, chat_id, model, run.dir,
                 max_rounds=int(req.get("rounds") or 3), approve_tools=True,
                 log=run.note, on_event=on_event, on_round=on_round,
                 stop=lambda: run.stop_requested, llm_model_id=req.get("llm_model_id") or None,
-                effort=effort_of(req),
+                effort=effort_of(req), first_round=first_round,
                 nova_db=nova_db, check_availability=bool(client), client=client,
                 owned=owned, owned_rebrickable_token=user_token if client else None,
                 ldraw_dir=ldraw_dir, pricer=pricer, price_options=price_options,
@@ -336,16 +372,24 @@ class Runner:
                 "owned": last.result.owned if last else None,
                 "price": last.result.price if last else None,
                 "connectivity": last.result.connectivity if last else None,
-                "tokens": tokens_sum([run.design_tokens, *(r.get("tokens") for r in run.rounds)]),
+                "tokens": tokens_sum([run.design_tokens, *(c.get("tokens") for c in run.refinements),
+                                      *(r.get("tokens") for r in run.rounds)]),
             }
             run.status = "stopped" if run.stop_requested else "done"
             models = produced()  # snapshots may have finished rendering since
             for entry in run.rounds:
                 decorate(entry, models)
         except (nova.NovaError, PipelineError, rebrickable.RebrickableError) as err:
-            run.error = str(err)
-            run.status = "failed"
-            run.note(f"Failed: {err}")
+            if refine is not None and run.result:
+                # A change that went wrong leaves the run's last good result in
+                # place, so the user can try a different change.
+                run.refinements[-1]["error"] = str(err)
+                run.status = "done" if run.result.get("clean") else "stopped"
+                run.note(f"The change did not go through: {err}")
+            else:
+                run.error = str(err)
+                run.status = "failed"
+                run.note(f"Failed: {err}")
         except Exception as err:  # noqa: BLE001 - surface anything to the page
             run.error = f"{type(err).__name__}: {err}"
             run.status = "failed"
@@ -353,6 +397,30 @@ class Runner:
         run.finished_at = time.time()
         run.phase = ""
         run.emit("finished", run.public())
+
+    def _refined_model(self, run: Run, agent: nova.Client, set_status, on_event, text: str) -> tuple[Path, str]:
+        """Ask the run's chat for a change and download the model it delivers."""
+        req = run.request
+        change = run.refinements[-1]
+        known = {m.id for m in agent.models(run.chat_id)}
+        run.agent_text = ""
+        run.note(f"Asked Nova for a change: {text[:120]}")
+        agent.send(run.chat_id, text + REFINE_MESSAGE_SUFFIX, options=agent_options(req),
+                   llm_model_id=req.get("llm_model_id") or None)
+        set_status("designing", "The agent is making your change")
+        turn = agent.wait_for_turn(run.chat_id, approve_tools=True, on_event=on_event,
+                                   stop=lambda: run.stop_requested)
+        change.update(seconds=int(turn.seconds), tokens=tokens_dict(turn.usage))
+        if turn.error:
+            raise nova.NovaError(f"The change turn failed: {turn.error}")
+        fresh = [m for m in agent.models(run.chat_id) if m.id not in known]
+        if not fresh:
+            raise nova.NovaError("The agent answered without delivering a changed model. "
+                                 "Open the Nova chat to see what it said.")
+        path = agent.download(fresh[-1], run.dir / "models")
+        change["model"] = path.name
+        run.note(f"Nova delivered {path.name} in {int(turn.seconds)} s")
+        return path, run.chat_id
 
     def _starting_model(self, run: Run, agent: nova.Client, set_status, on_event) -> tuple[Path, str]:
         """Resolve the request into (model path, chat id), designing first if asked."""
@@ -553,6 +621,22 @@ class Handler(BaseHTTPRequestHandler):
             if self.settings.get("locked"):
                 body.pop("rebrickable_key", None) if self.settings.get("rebrickable_key") else None
             run = self.runner.start(body)
+            return self.send_json(run.public(), 202)
+        m = re.fullmatch(r"/api/runs/([\w-]+)/refine", path)
+        if m:
+            run = self.run_for(m[1])
+            if not run:
+                return self.send_json({"error": "no such run"}, 404)
+            body = self.read_json()
+            text = (body.get("text") or "").strip()
+            if not text:
+                return self.send_json({"error": "Say what you would like changed."}, 400)
+            if self.settings.get("locked"):
+                body.pop("rebrickable_key", None) if self.settings.get("rebrickable_key") else None
+            try:
+                self.runner.refine(run, text, body)
+            except ValueError as err:
+                return self.send_json({"error": str(err)}, 409)
             return self.send_json(run.public(), 202)
         m = re.fullmatch(r"/api/runs/([\w-]+)/stop", path)
         if m:

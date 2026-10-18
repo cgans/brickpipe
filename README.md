@@ -43,6 +43,18 @@ localhost only.
 
 The command line below does the same things one step at a time.
 
+### Change the finished model
+
+When a run finishes, a "Change something" box appears under the outcome.
+Type what to change ("make the seat blue", "add a front loader") and press
+Send to the agent. The text goes to the same Nova chat, so the agent works
+on the model it already made. The changed model is checked and repaired
+like the first one: it shows up as a "Your change" row in the rounds table,
+followed by new rounds whose numbers carry on from the last. The outcome,
+the files and the token total then cover the changed model. You can repeat
+this as often as you like. If the agent answers without delivering a new
+model, the page says so and the last result stays.
+
 ### Whose AI account runs the agent
 
 Settings > AI account on the page: "Use the host's account" (Nova's default

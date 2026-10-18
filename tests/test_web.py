@@ -163,6 +163,52 @@ class WebTests(unittest.TestCase):
         self.wait_done(run["id"])
         self.assertNotIn("effort", self.fake.messages[-1]["options"])  # unknown values fall back to Nova's default
 
+    def test_refine_a_finished_run_in_its_chat(self):
+        status, run = http("POST", f"{self.base}/api/runs", {"prompt": "a shed"})
+        run = self.wait_done(run["id"])
+        self.assertTrue(run["result"]["clean"])
+        self.assertEqual([r["number"] for r in run["rounds"]], [1, 2])
+        sent_before = len(self.fake.messages)
+
+        status, body = http("POST", f"{self.base}/api/runs/{run['id']}/refine", {"text": "  "})
+        self.assertEqual(status, 400)
+        status, body = http("POST", f"{self.base}/api/runs/{run['id']}/refine",
+                            {"text": "Make the roof blue", "effort": "low"})
+        self.assertEqual(status, 202)
+        self.assertEqual(body["status"], "designing")
+        status, again = http("POST", f"{self.base}/api/runs/{run['id']}/refine", {"text": "and taller"})
+        self.assertEqual(status, 409)  # one change at a time
+        run = self.wait_done(run["id"])
+
+        self.assertEqual(run["status"], "done")
+        change_msg = self.fake.messages[sent_before]
+        self.assertTrue(change_msg["text"].startswith("Make the roof blue"))
+        self.assertIn("This is a change to the model you delivered", change_msg["text"])
+        self.assertEqual(change_msg["options"]["effort"], "low")
+        # the changed model is checked and repaired, carrying on the round numbers
+        self.assertEqual([r["number"] for r in run["rounds"]], [1, 2, 3, 4])
+        change = run["refinements"][0]
+        self.assertEqual((change["text"], change["first_round"], change["error"]), ("Make the roof blue", 3, None))
+        self.assertTrue(change["model"].endswith(".mpd"))
+        self.assertTrue(run["result"]["clean"])
+        self.assertEqual(run["result"]["tokens"]["turns"], 4)  # design, repair, change, repair
+        self.assertTrue((Path(self.tmp.name) / "runs" / run["id"] / "round-4" / "report.md").exists())
+
+    def test_a_change_that_delivers_nothing_keeps_the_last_result(self):
+        status, run = http("POST", f"{self.base}/api/runs", {"prompt": "a shed"})
+        run = self.wait_done(run["id"])
+        rounds_before = run["rounds"]
+        self.fake.deliver = False
+        try:
+            http("POST", f"{self.base}/api/runs/{run['id']}/refine", {"text": "What colour is it?"})
+            run = self.wait_done(run["id"])
+        finally:
+            self.fake.deliver = True
+        self.assertEqual(run["status"], "done")
+        self.assertIn("without delivering a changed model", run["refinements"][0]["error"])
+        self.assertEqual(run["rounds"], rounds_before)
+        self.assertTrue(run["result"]["clean"])
+
     def test_history_lists_runs_newest_first(self):
         for _ in range(2):
             status, run = http("POST", f"{self.base}/api/runs", {"chat_id": "latest", "rounds": 0})
