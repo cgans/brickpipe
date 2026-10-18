@@ -59,7 +59,7 @@ class WebTests(unittest.TestCase):
 
     def test_nova_listing(self):
         status, body = http("GET", f"{self.base}/api/nova/chats")
-        self.assertEqual([c["title"] for c in body["chats"]], ["BRAT"])
+        self.assertIn("BRAT", [c["title"] for c in body["chats"]])  # other tests add chats to the shared fake
 
     def test_empty_request_rejected(self):
         status, body = http("POST", f"{self.base}/api/runs", {})
@@ -154,6 +154,14 @@ class WebTests(unittest.TestCase):
         status, gone = http("POST", f"{self.base}/api/nova/llm-models/{made['id']}/delete", {})
         self.assertTrue(gone["deleted"])
         self.assertNotIn(made["id"], self.fake.llm_entries)
+
+    def test_effort_is_sent_with_design_and_repairs(self):
+        status, run = http("POST", f"{self.base}/api/runs", {"prompt": "a shed", "effort": "Medium"})
+        run = self.wait_done(run["id"])
+        self.assertEqual([m["options"].get("effort") for m in self.fake.messages[-2:]], ["medium", "medium"])
+        status, run = http("POST", f"{self.base}/api/runs", {"prompt": "a shed", "effort": "turbo"})
+        self.wait_done(run["id"])
+        self.assertNotIn("effort", self.fake.messages[-1]["options"])  # unknown values fall back to Nova's default
 
     def test_history_lists_runs_newest_first(self):
         for _ in range(2):
