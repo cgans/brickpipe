@@ -17,6 +17,7 @@ import mimetypes
 import queue
 import re
 import secrets
+import shutil
 import threading
 import time
 from dataclasses import dataclass, field
@@ -81,6 +82,8 @@ class Run:
     events_seen: int = 0
     design_tokens: dict | None = None  # Nova's token totals for the design turn
     refinements: list = field(default_factory=list)  # changes the user asked for after a run
+    rerun_of: str | None = None  # the run this one repeats
+    rerun_as: str | None = None  # the newest run that repeats this one
     stop_requested: bool = False
     subscribers: list[queue.Queue] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -101,7 +104,21 @@ class Run:
             "activity": self.activity[-60:],
             "design_tokens": self.design_tokens,
             "refinements": self.refinements,
+            "rerun_of": self.rerun_of, "rerun_as": self.rerun_as,
             "files": sorted(p.name for p in self.final_dir().iterdir()) if self.final_dir() else [],
+        }
+
+    def listing(self) -> dict:
+        """The few fields a list of runs needs (the full state is much larger)."""
+        req = self.request
+        result = self.result or {}
+        return {
+            "id": self.id, "status": self.status, "started_at": self.started_at,
+            "finished_at": self.finished_at, "error": self.error, "chat_url": self.chat_url,
+            "request": {k: req.get(k) for k in ("prompt", "model_file", "chat_id") if req.get(k)},
+            "result": {k: result.get(k) for k in ("clean", "reason", "final_model") if k in result} or None,
+            "rounds": len(self.rounds), "changes": len(self.refinements),
+            "rerun_of": self.rerun_of, "rerun_as": self.rerun_as,
         }
 
     def final_dir(self) -> Path | None:
@@ -199,7 +216,8 @@ class Runner:
                 continue
             run = Run(saved["id"], state.parent, saved.get("request", {}))
             for key in ("status", "phase", "chat_id", "chat_url", "rounds", "result",
-                        "error", "started_at", "finished_at", "log", "design_tokens", "refinements"):
+                        "error", "started_at", "finished_at", "log", "design_tokens", "refinements",
+                        "rerun_of", "rerun_as"):
                 if key in saved:
                     setattr(run, key, saved[key])
             if run.status not in ("done", "failed", "stopped"):
@@ -207,6 +225,41 @@ class Runner:
             self.runs[run.id] = run
 
     REFINABLE = ("done", "stopped")
+    FINISHED = ("done", "failed", "stopped")
+    DERIVED = ("availability", "prices", "owned_from_rebrickable", "owned_lines")  # added by public()
+
+    def rerun(self, run: Run, settings: dict | None = None) -> Run:
+        """Start the same request again as a new run. A run that began from a
+        prompt gets a fresh Nova chat; one that began from an existing model
+        checks that model again. Changes made after the first run are not
+        repeated."""
+        if run.status not in self.FINISHED:
+            raise ValueError("This run is still going; stop it first.")
+        request = {k: v for k, v in run.request.items() if k not in self.DERIVED}
+        for key in self.RUN_SETTINGS:
+            if settings and key in settings:
+                request[key] = settings[key]
+        new = self.start(request, rerun_of=run.id)
+        run.rerun_as = new.id
+        run.save()
+        return new
+
+    def delete(self, run: Run) -> None:
+        """Forget a finished run and remove its folder. Nova's chat is kept."""
+        if run.status not in self.FINISHED:
+            raise ValueError("This run is still going; stop it first.")
+        folder = run.dir.resolve()
+        if folder.parent != self.runs_dir.resolve():
+            raise ValueError("That run is not in the runs folder.")
+        self.runs.pop(run.id, None)
+        shutil.rmtree(folder, ignore_errors=True)
+        for other in self.runs.values():
+            if other.rerun_of == run.id or other.rerun_as == run.id:
+                if other.rerun_of == run.id:
+                    other.rerun_of = None
+                if other.rerun_as == run.id:
+                    other.rerun_as = None
+                other.save()
     RUN_SETTINGS = ("nova_url", "nova_db", "ldraw_dir", "rounds", "effort", "rebrickable_key",
                     "rebrickable_user_token", "owned_text", "llm_model_id", "bricklink", "price_region",
                     "price_currency", "price_condition", "price_guide")
@@ -227,9 +280,9 @@ class Runner:
         threading.Thread(target=self._execute, args=(run,), kwargs={"refine": text}, daemon=True).start()
         return run
 
-    def start(self, request: dict) -> Run:
+    def start(self, request: dict, rerun_of: str | None = None) -> Run:
         run_id = time.strftime("%Y%m%d-%H%M%S") + "-" + secrets.token_hex(2)
-        run = Run(run_id, self.runs_dir / run_id, request)
+        run = Run(run_id, self.runs_dir / run_id, request, rerun_of=rerun_of)
         run.dir.mkdir(parents=True)
         self.runs[run_id] = run
         threading.Thread(target=self._execute, args=(run,), daemon=True).start()
@@ -554,8 +607,15 @@ class Handler(BaseHTTPRequestHandler):
                                    "ldraw_download": self.ldraw_download,
                                    "features": features.all_flags()})
         if path == "/api/runs":
+            query = parse_qs(url.query)
+            try:
+                limit = max(0, int((query.get("limit") or ["50"])[0]))
+                offset = max(0, int((query.get("offset") or ["0"])[0]))
+            except ValueError:
+                return self.send_json({"error": "limit and offset are numbers"}, 400)
             runs = sorted(self.runner.runs.values(), key=lambda r: r.started_at, reverse=True)
-            return self.send_json({"runs": [r.public() for r in runs[:50]]})
+            page = runs[offset:offset + limit] if limit else runs[offset:]
+            return self.send_json({"runs": [r.listing() for r in page], "total": len(runs)})
         if path == "/api/nova/models":
             return self.proxy_nova(lambda agent: {"models": [
                 {k: m.get(k) for k in ("file", "name", "parts", "image_url", "chats")}
@@ -638,6 +698,29 @@ class Handler(BaseHTTPRequestHandler):
             except ValueError as err:
                 return self.send_json({"error": str(err)}, 409)
             return self.send_json(run.public(), 202)
+        m = re.fullmatch(r"/api/runs/([\w-]+)/rerun", path)
+        if m:
+            run = self.run_for(m[1])
+            if not run:
+                return self.send_json({"error": "no such run"}, 404)
+            body = self.read_json()
+            if self.settings.get("locked"):
+                body.pop("rebrickable_key", None) if self.settings.get("rebrickable_key") else None
+            try:
+                new = self.runner.rerun(run, body)
+            except ValueError as err:
+                return self.send_json({"error": str(err)}, 409)
+            return self.send_json(new.public(), 202)
+        m = re.fullmatch(r"/api/runs/([\w-]+)/delete", path)
+        if m:
+            run = self.run_for(m[1])
+            if not run:
+                return self.send_json({"error": "no such run"}, 404)
+            try:
+                self.runner.delete(run)
+            except ValueError as err:
+                return self.send_json({"error": str(err)}, 409)
+            return self.send_json({"deleted": run.id})
         m = re.fullmatch(r"/api/runs/([\w-]+)/stop", path)
         if m:
             run = self.run_for(m[1])
