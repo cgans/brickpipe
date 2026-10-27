@@ -78,6 +78,11 @@ model entry) or "Use my own key" — pick a provider and model, paste a key,
 and brickpipe registers it in Nova as a model entry of its own; that
 person's runs are then billed to their key. The key goes once to Nova,
 which keeps it in its settings store; brickpipe keeps only the entry's id.
+On a hosted (locked) brickpipe only the browser that added a key can remove
+it: brickpipe hands that browser a removal token and keeps just its hash. The
+host's default entry can't be removed from brickpipe at all. Keys added
+before this change have no token, so on a hosted server the host removes
+those in Nova directly.
 
 ### Hosting it for other people
 

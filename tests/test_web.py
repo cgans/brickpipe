@@ -1,5 +1,7 @@
 """The web app's API against a stand-in Nova (the FakeNova from test_loop)."""
+import hashlib
 import json
+import stat
 import tempfile
 import threading
 import time
@@ -154,6 +156,17 @@ class WebTests(unittest.TestCase):
         status, gone = http("POST", f"{self.base}/api/nova/llm-models/{made['id']}/delete", {})
         self.assertTrue(gone["deleted"])
         self.assertNotIn(made["id"], self.fake.llm_entries)
+
+    def test_unlocked_forget_works_without_a_token_but_never_for_the_default(self):
+        status, made = http("POST", f"{self.base}/api/nova/llm-models", {"model": "openai/gpt-6-luna", "api_key": "sk-local"})
+        self.assertTrue(made["token"])
+        status, gone = http("POST", f"{self.base}/api/nova/llm-models/{made['id']}/delete", {})
+        self.assertEqual((status, gone["deleted"]), (200, True))
+        self.assertNotIn(made["id"], self.fake.llm_entries)
+        status, err = http("POST", f"{self.base}/api/nova/llm-models/host/delete", {})
+        self.assertEqual(status, 403)
+        self.assertIn("default", err["error"])
+        self.assertIn("host", self.fake.llm_entries)
 
     def test_effort_is_sent_with_design_and_repairs(self):
         status, run = http("POST", f"{self.base}/api/runs", {"prompt": "a shed", "effort": "Medium"})
@@ -343,3 +356,148 @@ class HostedTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HostedOwnKeyTests(unittest.TestCase):
+    """On a locked server only the browser that added a key can remove it,
+    and nobody can remove Nova's default entry through brickpipe."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.fake = FakeNova()
+        cls.original_init = nova.Client.__init__
+
+        def patched(self, base_url=nova.DEFAULT_URL, opener=None, public_url=None):
+            cls.original_init(self, base_url, cls.fake, public_url)
+        nova.Client.__init__ = patched
+        cls.runs = Path(cls.tmp.name) / "runs"
+        cls.server = web.make_server(0, cls.runs, nova_url="http://ldraw-nova-app:8000", nova_db="", locked=True)
+        cls.port = cls.server.server_address[1]
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        cls.base = f"http://127.0.0.1:{cls.port}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        nova.Client.__init__ = cls.original_init
+        cls.tmp.cleanup()
+
+    def add(self, key="sk-family"):
+        status, made = http("POST", f"{self.base}/api/nova/llm-models", {"model": "openai/gpt-6-luna", "api_key": key})
+        self.assertEqual(status, 200)
+        return made
+
+    def delete(self, entry_id, body):
+        return http("POST", f"{self.base}/api/nova/llm-models/{entry_id}/delete", body)
+
+    def test_add_returns_a_token_that_is_only_kept_as_a_hash(self):
+        made = self.add("sk-secret-key")
+        self.assertEqual(set(made), {"id", "token"})
+        self.assertGreaterEqual(len(made["token"]), 40)
+        status, acc = http("GET", f"{self.base}/api/nova/llm-models")
+        self.assertNotIn(made["token"], json.dumps(acc))
+        self.assertNotIn(made["token"], json.dumps(self.fake.llm_entries))  # Nova never sees it
+        stored = (self.runs / "own-keys.json")
+        text = stored.read_text()
+        self.assertNotIn(made["token"], text)
+        self.assertNotIn("sk-secret-key", text)
+        self.assertEqual(json.loads(text)[made["id"]], hashlib.sha256(made["token"].encode()).hexdigest())
+        self.assertEqual(stat.S_IMODE(stored.stat().st_mode), 0o600)
+        self.assertFalse((self.runs / "own-keys.json.tmp").exists())  # no temp file left behind
+
+    def test_only_the_right_token_removes_an_entry(self):
+        made = self.add()
+        other = self.add("sk-someone-else")
+        status, err = self.delete(made["id"], {})
+        self.assertEqual(status, 403)
+        self.assertIn("Only the browser that added", err["error"])
+        status, _ = self.delete(made["id"], {"token": "not-the-token"})
+        self.assertEqual(status, 403)
+        status, _ = self.delete(made["id"], {"token": other["token"]})  # someone else's token
+        self.assertEqual(status, 403)
+        self.assertIn(made["id"], self.fake.llm_entries)
+        status, gone = self.delete(made["id"], {"token": made["token"]})
+        self.assertEqual((status, gone["deleted"]), (200, True))
+        self.assertNotIn(made["id"], self.fake.llm_entries)
+        self.assertNotIn(made["id"], json.loads((self.runs / "own-keys.json").read_text()))
+        self.assertIn(other["id"], self.fake.llm_entries)
+        # Repeating it succeeds: the entry is gone either way, and the page can tidy up.
+        status, again = self.delete(made["id"], {"token": made["token"]})
+        self.assertEqual((status, again.get("already_gone")), (200, True))
+
+    def test_entry_nova_no_longer_has_can_be_forgotten(self):
+        made = self.add()
+        self.fake.llm_entries.pop(made["id"])  # removed in Nova directly
+        status, gone = self.delete(made["id"], {})
+        self.assertEqual((status, gone["deleted"]), (200, True))
+        self.assertNotIn(made["id"], json.loads((self.runs / "own-keys.json").read_text()))
+
+    def test_entry_hidden_from_nova_list_is_still_removed_properly(self):
+        # Nova hides entries whose model it no longer supports; they still exist.
+        made = self.add()
+        self.fake.llm_entries[made["id"]]["unsupported"] = True
+        status, acc = http("GET", f"{self.base}/api/nova/llm-models")
+        self.assertNotIn(made["id"], [m["id"] for m in acc["models"]])
+        status, _ = self.delete(made["id"], {})
+        self.assertEqual(status, 403)  # not mistaken for "already gone"
+        self.assertIn(made["id"], json.loads((self.runs / "own-keys.json").read_text()))
+        status, gone = self.delete(made["id"], {"token": made["token"]})
+        self.assertEqual(status, 200)
+        self.assertNotIn("already_gone", gone)
+        self.assertNotIn(made["id"], self.fake.llm_entries)
+
+    def test_nova_deleted_false_counts_as_already_gone(self):
+        made = self.add()
+        real = self.fake.__call__
+        calls = []
+
+        def vanish_first(req):  # removed in Nova between our check and our delete
+            if req.get_method() == "DELETE" and not calls:
+                calls.append(1)
+                self.fake.llm_entries.pop(made["id"], None)
+            return real(req)
+        nova.Client.__init__, original = (lambda c, base_url=nova.DEFAULT_URL, opener=None, public_url=None:
+                                          type(self).original_init(c, base_url, vanish_first, public_url)), nova.Client.__init__
+        try:
+            status, gone = self.delete(made["id"], {"token": made["token"]})
+        finally:
+            nova.Client.__init__ = original
+        self.assertEqual((status, gone.get("already_gone")), (200, True))
+        self.assertNotIn(made["id"], json.loads((self.runs / "own-keys.json").read_text()))
+
+    def test_failed_token_save_removes_the_new_entry(self):
+        tokens = self.server.RequestHandlerClass.key_tokens
+        before = set(self.fake.llm_entries)
+
+        def broken(entry_id):
+            raise OSError("disk full")
+        tokens.issue = broken
+        try:
+            status, err = http("POST", f"{self.base}/api/nova/llm-models", {"model": "openai/gpt-6-luna", "api_key": "sk-x"})
+        finally:
+            del tokens.issue
+        self.assertEqual(status, 500)
+        self.assertIn("Nothing was kept", err["error"])
+        self.assertNotIn("sk-x", json.dumps(err))
+        self.assertEqual(set(self.fake.llm_entries), before)
+
+    def test_fallback_default_is_protected_when_novas_own_default_is_hidden(self):
+        # Runs with no entry named use Nova's first usable entry when its own
+        # default is unusable, so that entry is the one to protect.
+        self.add()  # so there is a usable entry to fall back to
+        self.fake.llm_entries["host"]["unsupported"] = True
+        try:
+            status, acc = http("GET", f"{self.base}/api/nova/llm-models")
+            fallback = acc["default_id"]
+            self.assertNotEqual(fallback, "host")
+            status, _ = self.delete(fallback, {"token": "anything"})
+            self.assertEqual(status, 403)
+        finally:
+            self.fake.llm_entries["host"].pop("unsupported")
+
+    def test_default_entry_cannot_be_removed(self):
+        status, err = self.delete("host", {})
+        self.assertEqual(status, 403)
+        self.assertIn("default", err["error"])
+        self.assertIn("host", self.fake.llm_entries)

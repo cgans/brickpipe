@@ -32,7 +32,9 @@ TURN_TIMEOUT = 60 * 60  # the agent can run for a long time on a big model
 
 
 class NovaError(RuntimeError):
-    pass
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__(message)
+        self.status = status  # Nova's HTTP status, when it answered at all
 
 
 @dataclass
@@ -90,7 +92,7 @@ class Client:
                 raw = response.read()
         except urllib.error.HTTPError as err:
             detail = err.read().decode("utf-8", "replace")[:300]
-            raise NovaError(f"Nova returned HTTP {err.code} for {method} {path}: {detail}") from None
+            raise NovaError(f"Nova returned HTTP {err.code} for {method} {path}: {detail}", err.code) from None
         except (urllib.error.URLError, TimeoutError, ConnectionError) as err:
             raise NovaError(
                 f"Could not reach Nova at {self.base_url} ({err}). Is the web app "
@@ -216,8 +218,21 @@ class Client:
         return self._request("POST", "/api/llm-models", {
             "model_name": name, "litellm_params": {"model": model, "api_key": api_key}})
 
-    def delete_llm_model(self, entry_id: str) -> None:
-        self._request("DELETE", f"/api/llm-models/{urllib.parse.quote(entry_id, safe='')}")
+    def has_llm_model(self, entry_id: str) -> bool:
+        """Whether Nova has the entry at all, including ones its builder
+        list hides (models it no longer supports)."""
+        try:
+            self._request("GET", f"/api/llm-models/{urllib.parse.quote(entry_id, safe='')}/edit")
+        except NovaError as err:
+            if err.status == 404:
+                return False
+            raise
+        return True
+
+    def delete_llm_model(self, entry_id: str) -> bool:
+        """False when Nova had no such entry (it answers 200 either way)."""
+        body = self._request("DELETE", f"/api/llm-models/{urllib.parse.quote(entry_id, safe='')}")
+        return body.get("deleted") is not False
 
     def approve(self, chat_id: str, approval_id: str) -> None:
         self._request("POST", f"/api/chats/{chat_id}/approvals/{approval_id}", {"approved": True})
