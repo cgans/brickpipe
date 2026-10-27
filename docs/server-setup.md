@@ -5,19 +5,29 @@ Debian VM with Docker, a Cloudflare tunnel token and an Access login", ready
 for [docs/hosting.md, step "4. Start it"](hosting.md#4-start-it). It replaces
 steps 1–3 of that file with scripts.
 
+> **Before you start: merge PR #36 and PR #37 into `main` first.** The commands
+> below download `create-vm.sh` and `bootstrap.sh` from `main`, and the
+> `brickpipe` clone needs the update/backup scripts from #36. Until both are
+> merged, those URLs return 404 or old files.
+
+> **Your values.** This page uses placeholders: `example.com` stands for your
+> own domain on Cloudflare (so `bricks.example.com` and `nova.example.com` are
+> your two hostnames), and the 192.168.1.x addresses are typical home-LAN
+> defaults. Substitute your own everywhere you see them.
+
 What you end up with:
 
 | Thing | Value (defaults; change them if your answers differ) |
 |---|---|
-| Proxmox host | `pve.snaghomes.dev`, 192.168.1.10 |
+| Proxmox host | your Proxmox host, e.g. 192.168.1.10 |
 | New VM | VMID **110**, name `brickpipe`, Debian 13 cloud image, 2 cores, 6 GB RAM, 40 GB disk on `local-lvm`, start at boot |
 | VM address | DHCP (default) or a static one you choose, e.g. `192.168.1.40/24` |
 | Login | user `chris`, SSH key only, no root login, no passwords |
 | Inbound firewall | SSH from `192.168.1.0/24` only. Nothing else. Nothing forwarded on the router. |
-| Public access | `bricks.snaghomes.dev` and `nova.snaghomes.dev` through a Cloudflare Tunnel (outbound only) behind Cloudflare Access |
+| Public access | `bricks.example.com` and `nova.example.com` through a Cloudflare Tunnel (outbound only) behind Cloudflare Access |
 
 **Leave the Home Assistant VM alone.** Nothing here stops, changes or takes
-resources from VM 100 (`gans-home-assistant`). `create-vm.sh` refuses VMID 100
+resources from your Home Assistant VM (VMID 100). `create-vm.sh` refuses VMID 100
 outright and refuses to run if the new VM would leave the host short on
 memory.
 
@@ -41,7 +51,10 @@ Answer these first. Each one is a script option.
 
 Memory rule of thumb: host total − 4 GB (HA) − 6 GB (brickpipe) should be at
 least 2 GB, i.e. a host with 12 GB or more. On a smaller host use `--memory 4096`
-(Nova runs; builds are slower).
+**and** set `NOVA_MEM_LIMIT=2g` in `deploy/.env` (hosting.md "Start it"):
+the stack's default container limits (3g Nova + 1g brickpipe + 256m
+cloudflared) would otherwise leave nothing for the OS. Nova runs; builds are
+slower.
 
 ### Make an SSH key on the laptop
 
@@ -80,7 +93,6 @@ scp $env:USERPROFILE\.ssh\id_ed25519.pub root@192.168.1.10:/root/chris.pub
 ```bash
 cd /root
 curl -fsSLO https://raw.githubusercontent.com/cgans/brickpipe/main/deploy/proxmox/create-vm.sh
-# (before this is merged, use .../brickpipe/deploy/server/deploy/proxmox/create-vm.sh)
 less create-vm.sh
 chmod +x create-vm.sh
 ./create-vm.sh --help
@@ -156,7 +168,10 @@ What it does, in order, each step skipped if already done:
 6. Firewall: an nftables table `inet brickpipe_fw` that drops all inbound
    traffic except SSH (and ping) from the LAN. It refuses to install if your
    current SSH session comes from outside `--lan-cidr`, so you cannot cut
-   yourself off. It lives in its own table and never flushes Docker's rules.
+   yourself off. It lives in its own table, loaded by its own unit
+   `brickpipe-firewall.service`, and never flushes Docker's rules. Debian's
+   stock `nftables.service` is masked, because its `/etc/nftables.conf` starts
+   with `flush ruleset` and would wipe both tables.
 7. SSH hardening (no passwords, no root) — **only** if your
    `~/.ssh/authorized_keys` has a valid key; otherwise it warns and skips.
 
@@ -173,7 +188,7 @@ exit
 cd ~/lego
 git clone https://github.com/cgans/brickpipe.git
 git clone --branch v0.6.0 https://github.com/anteloc/ldraw-nova.git
-git clone --branch v0.6.0 https://github.com/anteloc/ldraw-nova-docker.git
+git clone --branch master https://github.com/cgans/ldraw-nova-docker.git
 docker run --rm hello-world
 ```
 
@@ -185,10 +200,12 @@ docker run --rm hello-world
   (keep the first one open until this succeeds);
 - `ssh -o PubkeyAuthentication=no chris@192.168.1.40` is refused with
   `Permission denied (publickey)`;
-- `sudo nft list table inet brickpipe_fw` shows the rules.
+- `sudo nft list table inet brickpipe_fw` shows the rules, and
+  `systemctl is-enabled nftables` prints `masked`.
 
 **Undo:** firewall — `sudo systemctl disable --now brickpipe-firewall`
-(removes the table). SSH hardening — `sudo rm /etc/ssh/sshd_config.d/10-brickpipe-hardening.conf && sudo systemctl reload ssh`.
+(removes the table); `sudo systemctl unmask nftables` only if you want Debian's stock
+firewall file back (remove its `flush ruleset` line first). SSH hardening — `sudo rm /etc/ssh/sshd_config.d/10-brickpipe-hardening.conf && sudo systemctl reload ssh`.
 Everything else — destroy and recreate the VM (step 1 undo).
 
 ---
@@ -196,7 +213,7 @@ Everything else — destroy and recreate the VM (step 1 undo).
 ## 3. Cloudflare Zero Trust: tunnel, login, hostnames
 
 All in <https://one.dash.cloudflare.com> (Zero Trust, free plan), account that
-owns `snaghomes.dev`. Do the Access login **before** the hostnames, so the
+owns your domain (`example.com` on this page). Do the Access login **before** the hostnames, so the
 hostnames are never reachable without it. Menu names move around in the
 Cloudflare dashboard; the older names are in brackets.
 
@@ -218,7 +235,7 @@ expected until the stack runs).
 
 1. **Access controls > Applications** (older: *Access > Applications*) **> Add an application > Self-hosted**.
 2. Name `brickpipe`. Add **two** public hostnames (destinations) in the same
-   application: `bricks.snaghomes.dev` and `nova.snaghomes.dev`.
+   application: `bricks.example.com` and `nova.example.com`.
 3. **Session duration:** `1 week` (one login per week per device; shorter if
    you prefer).
 4. Identity provider / login method: **One-time PIN** (built in; Cloudflare
@@ -237,20 +254,20 @@ Tunnel `brickpipe` **> Edit > Public hostnames** (newer: *Published application 
 
 | Subdomain | Domain | Service type | URL |
 |---|---|---|---|
-| `bricks` | `snaghomes.dev` | HTTP | `brickpipe:8766` |
-| `nova` | `snaghomes.dev` | HTTP | `nova:8000` |
+| `bricks` | `example.com` | HTTP | `brickpipe:8766` |
+| `nova` | `example.com` | HTTP | `nova:8000` |
 
 `brickpipe` and `nova` are the compose service names; the `cloudflared`
 container resolves them on the compose network. Cloudflare creates the DNS
 CNAMEs itself.
 
-**Done when:** in a private browser window, `https://bricks.snaghomes.dev` and
-`https://nova.snaghomes.dev` both show the Cloudflare Access login page, an
+**Done when:** in a private browser window, `https://bricks.example.com` and
+`https://nova.example.com` both show the Cloudflare Access login page, an
 email **on** the list gets a code, and an email **not** on the list does not
 get in. (After login you get a Cloudflare error page until the stack runs —
 expected.)
 **Undo:** delete the two public hostnames (and their DNS records under
-the `snaghomes.dev` DNS page if Cloudflare leaves them behind).
+your domain's DNS page if Cloudflare leaves them behind).
 
 ---
 
@@ -298,7 +315,7 @@ with `pvesm free <volid>`.
 
 Continue with [docs/hosting.md, step "4. Start it"](hosting.md#4-start-it) on
 the VM (in `~/lego/brickpipe`), using the tunnel token from 3a and the
-hostnames `bricks.snaghomes.dev` / `nova.snaghomes.dev`.
+hostnames `bricks.example.com` / `nova.example.com`.
 
 ---
 
@@ -306,13 +323,13 @@ hostnames `bricks.snaghomes.dev` / `nova.snaghomes.dev`.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `create-vm.sh`: `not enough memory` | Host RAM too small for HA (4 GB) + 6 GB + 2 GB reserve | `free -h`; use `--memory 4096`. Use `--force-memory` only if you know the numbers. |
+| `create-vm.sh`: `not enough memory` | Host RAM too small for HA (4 GB) + 6 GB + 2 GB reserve | `free -h`; use `--memory 4096` and `NOVA_MEM_LIMIT=2g` in `deploy/.env`. Use `--force-memory` only if you know the numbers. |
 | `create-vm.sh`: `storage 'local-lvm' is not active or does not hold VM disks` | Different storage name | Pick a name from the printed `pvesm status` list; `--storage NAME`. |
 | `create-vm.sh`: `VMID 110 already exists` | Earlier run, or used by another VM/CT | Check with `qm config 110`. If it is a failed brickpipe attempt, run the undo; else `--vmid 111`. |
 | `checksum mismatch` | Download cut off, or Debian published a new build mid-download | Re-run; it re-fetches both. If it repeats, stop and check <https://cloud.debian.org/images/cloud/>. |
 | `ssh` times out | Wrong IP / VM not up yet / not on the LAN | `qm status 110`; `qm terminal 110` to watch boot (Ctrl+O exits); check the router lease. |
 | `Permission denied (publickey)` | Wrong key or user | `ssh -v chris@IP`; on **[pve]** `qm cloudinit dump 110 user` shows the key and user it was given. |
-| Locked out of SSH after bootstrap | `--lan-cidr` wrong after a network change | **[pve]** `qm set 110 --cipassword 'temp'` then `qm reboot 110`, log in with `qm terminal 110`, `sudo systemctl stop brickpipe-firewall`, fix, re-run bootstrap with the right `--lan-cidr`. Remove the password after: `sudo passwd -l chris`. |
+| Locked out of SSH after bootstrap | `--lan-cidr` wrong after a network change | **[pve]** `qm set 110 --cipassword 'temp'` then `qm reboot 110`, log in with `qm terminal 110`, `sudo systemctl stop brickpipe-firewall`, fix, re-run bootstrap with the right `--lan-cidr`. Then remove the temporary password: **[vm]** `sudo passwd -l chris`, and **[pve]** `qm set 110 --delete cipassword` (110 = your VMID). |
 | bootstrap: `Docker repo key fingerprint is ...` | Docker rotated the key, or interception | Stop. Compare with <https://docs.docker.com/engine/install/debian/>. |
 | bootstrap: `[FAIL] guest agent` | Agent option off in Proxmox | **[pve]** `qm set 110 --agent enabled=1`, then `qm reboot 110`. |
 | `docker: permission denied` | Group not active in this session | Log out and back in. |

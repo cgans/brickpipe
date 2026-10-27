@@ -12,6 +12,11 @@
 # rules are left alone, so restarting the firewall never breaks container
 # networking. Only the input hook is filtered: containers' outbound traffic
 # (the Cloudflare tunnel) goes through forward/output and is not affected.
+# Debian's stock nftables.service is MASKED: its /etc/nftables.conf starts with
+# 'flush ruleset' (and its stop action flushes too), which would wipe this
+# table and Docker's rules. Our own unit, brickpipe-firewall.service, loads
+# the table at boot instead. To use /etc/nftables.conf later, unmask it and
+# remove 'flush ruleset' from it first.
 
 set -euo pipefail
 
@@ -209,6 +214,8 @@ table inet brickpipe_fw {
     iifname \"br-*\" accept
     # IPv6 needs neighbour discovery; ping from the LAN helps troubleshooting.
     icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert, nd-router-solicit } accept
+    # DHCPv6 client replies (link-local server, port 547 -> 546).
+    ip6 saddr fe80::/10 udp sport 547 udp dport 546 accept
     ip saddr $LAN_CIDR icmp type echo-request accept
     ip saddr $LAN_CIDR tcp dport 22 ct state new accept
   }
@@ -236,6 +243,14 @@ WantedBy=multi-user.target"
   if [[ ! -f $FW_UNIT ]] || [[ $(cat "$FW_UNIT") != "$fw_unit" ]]; then
     printf '%s\n' "$fw_unit" > "$FW_UNIT"
     systemctl daemon-reload
+  fi
+  # Mask (do not stop) Debian's nftables.service: stopping it runs
+  # 'nft flush ruleset', and starting it loads a file that flushes everything.
+  if [[ $(systemctl is-enabled nftables.service 2>/dev/null || true) != masked ]]; then
+    systemctl mask nftables.service >/dev/null 2>&1
+    ok "masked nftables.service (its 'flush ruleset' would wipe Docker's rules)"
+  else
+    ok "nftables.service already masked"
   fi
   systemctl enable brickpipe-firewall.service >/dev/null 2>&1
   systemctl restart brickpipe-firewall.service
@@ -297,6 +312,11 @@ check "unattended-upg" systemctl is-enabled unattended-upgrades
 check "guest agent" systemctl is-active qemu-guest-agent
 if [[ $DO_FIREWALL -eq 1 ]]; then
   check "firewall" systemctl is-active brickpipe-firewall
+  nft_svc_masked() {
+    [[ $(systemctl is-enabled nftables.service 2>/dev/null || true) == masked ]] \
+      && echo "masked (cannot flush the ruleset)"
+  }
+  check "nftables.svc" nft_svc_masked
   check "fw table" sh -c 'nft list table inet brickpipe_fw >/dev/null && echo "inet brickpipe_fw loaded, SSH from '"$LAN_CIDR"' only"'
 fi
 check "sshd password" sh -c 'sshd -T 2>/dev/null | grep -i "^passwordauthentication"'

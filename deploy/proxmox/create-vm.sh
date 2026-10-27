@@ -31,7 +31,7 @@ FORCE_MEMORY=0
 APPLY=0
 START=1
 
-PROTECTED_VMIDS="100"   # gans-home-assistant: never touched, never reused
+PROTECTED_VMIDS="100"   # your Home Assistant VM: never touched, never reused
 
 usage() {
   cat <<EOF
