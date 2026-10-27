@@ -257,6 +257,10 @@ class OwnKeyTokens:
             stored = self._load().get(entry_id)
         return bool(stored and token) and hmac.compare_digest(stored, self._hash(token))
 
+    def known(self, entry_id: str) -> bool:
+        with self.lock:
+            return entry_id in self._load()
+
     def forget(self, entry_id: str) -> None:
         with self.lock:
             data = self._load()
@@ -753,6 +757,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "Give a prompt, or pick a model or chat."}, 400)
             if self.settings.get("locked"):
                 body.pop("rebrickable_key", None) if self.settings.get("rebrickable_key") else None
+            if self.refuse_llm_model(body.get("llm_model_id"), body.pop("llm_model_token", None)):
+                return
             run = self.runner.start(body)
             return self.send_json(run.public(), 202)
         m = re.fullmatch(r"/api/runs/([\w-]+)/refine", path)
@@ -766,6 +772,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "Say what you would like changed."}, 400)
             if self.settings.get("locked"):
                 body.pop("rebrickable_key", None) if self.settings.get("rebrickable_key") else None
+            if self.refuse_llm_model(body.get("llm_model_id", run.request.get("llm_model_id")),
+                                     body.pop("llm_model_token", None)):
+                return
             try:
                 self.runner.refine(run, text, body)
             except ValueError as err:
@@ -779,6 +788,11 @@ class Handler(BaseHTTPRequestHandler):
             body = self.read_json()
             if self.settings.get("locked"):
                 body.pop("rebrickable_key", None) if self.settings.get("rebrickable_key") else None
+            # A rerun keeps the old run's AI account unless the page sends one;
+            # either way the token has to come with this request.
+            if self.refuse_llm_model(body.get("llm_model_id", run.request.get("llm_model_id")),
+                                     body.pop("llm_model_token", None)):
+                return
             try:
                 new = self.runner.rerun(run, body)
             except ValueError as err:
@@ -823,6 +837,29 @@ class Handler(BaseHTTPRequestHandler):
 
         threading.Thread(target=work, daemon=True).start()
         return self.send_json(state, 202)
+
+    def refuse_llm_model(self, entry_id, token) -> bool:
+        """On a locked server a run may use an own-key entry only with the
+        token handed to the browser that added it; the host's default and
+        "no entry" need none. Sends the refusal and returns True if refused.
+        The token is checked here and never kept."""
+        if not self.settings.get("locked") or not entry_id:
+            return False
+        try:
+            default_id = nova.Client(self.settings["nova_url"],
+                                     public_url=self.settings.get("nova_public_url")).llm_models().get("default_id")
+        except nova.NovaError as err:
+            self.send_json({"error": str(err)}, 502)
+            return True
+        # The default needs no token only if it isn't someone's own key: Nova
+        # falls back to its first usable entry, which can be one added here.
+        if entry_id == default_id and not self.key_tokens.known(str(entry_id)):
+            return False
+        if self.key_tokens.matches(str(entry_id), str(token or "")):
+            return False
+        self.send_json({"error": "This key belongs to someone else's browser, or was removed. "
+                                 "Choose the host's account or add your own key in Settings."}, 403)
+        return True
 
     def delete_llm_model(self, entry_id: str, token: str):
         """Remove an AI-account entry. Never Nova's default; on a locked
