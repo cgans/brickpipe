@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Update the hosted stack: pull brickpipe, the Nova fork (master) and the
-# Nova toolkit (pinned tag), rebuild, restart, and remove dangling images.
+# Nova toolkit (pinned tag), rebuild, restart, remove dangling images
+# and build cache older than a week.
 #
 #   ~/lego/brickpipe/deploy/update.sh
 #
@@ -109,6 +110,9 @@ main() {
 
     say "Removing dangling images left by the rebuild"
     docker image prune -f
+
+    say "Removing build cache older than a week (newer cache keeps rebuilds fast)"
+    docker builder prune -f --filter until=168h
 
     say "Done"
     "${COMPOSE[@]}" ps

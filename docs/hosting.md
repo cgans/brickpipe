@@ -41,11 +41,35 @@ flowchart LR
   it. "Forget" removes the entry again. Set `BRICKPIPE_HOST_NAME=Chris` so
   the toggle names you.
 
+## Trust model
+
+Nova has no per-user accounts or permissions. Everyone on the Cloudflare
+Access allowlist reaches the same Nova and the same brickpipe, and can:
+
+- open Nova's Settings and edit or delete any agent, including the host's
+  default and other people's own-key agents. Editing an agent can redirect
+  its stored key elsewhere (for example by changing its `api_base`);
+- override `ANTHROPIC_API_KEY` (or any other variable) under Nova's
+  Settings > Environment variables;
+- use "Sign in with Claude" or "Sign in with ChatGPT" in Nova;
+- delete any agent, the host default included, through brickpipe's own
+  "Forget" endpoint, which does not check who registered the agent.
+
+Stored keys appear masked in Nova's API responses, but nobody has shown that
+they cannot be read some other way. So:
+
+- **The allowlist must only hold people you trust with every key on the
+  server**: yours and every family member's own key.
+- **"Don't sign in with Claude on this server" is a rule people follow,
+  not something the system enforces.** Anyone on the allowlist could do it.
+- Keep the host key in its own capped workspace (step 5) so the worst case
+  is bounded.
+
 ## 0. Before you start
 
-- Get an Anthropic API key for the server and cap its monthly spend in
-  the Anthropic console (step 5). Nova spends it; a login in front is not a
-  budget.
+- Plan an Anthropic API key for the server that lives in its own
+  workspace with a monthly spend limit (step 5). Nova spends it; a login in
+  front is not a budget.
 - Pick two hostnames under your domain, e.g. `bricks.example.com` and
   `nova.example.com`.
 - The stack needs about 4 GB RAM and 25 GB disk (Nova's image is 5 GB, the
@@ -108,9 +132,12 @@ On this shared server Nova's **default** agent runs on **your Anthropic API
 key** (the host's key). Family members who would rather pay for their own
 runs switch to their own key in brickpipe; everyone else uses yours.
 
-1. In the [Anthropic console](https://platform.claude.com/settings/keys)
-   create a key for this server and **set a monthly spend limit** on it
-   (Settings > Limits). Nova spends it; the login in front is not a budget.
+1. In the [Anthropic Console](https://platform.claude.com/), create a
+   **workspace** for this server (e.g. `brickpipe`) and **set that
+   workspace's monthly spend limit**. Spend limits apply to an organization
+   or a workspace, not to a single key, so the separate workspace is what
+   caps the server. Then create the server's API key **inside that
+   workspace**. Nova spends it; the login in front is not a budget.
 2. Put it in `deploy/.env` as `ANTHROPIC_API_KEY=...` and run
    `deploy/update.sh` (the container is recreated with the key).
 3. Nova does not pick the key up by itself; it needs an agent that reads it.
@@ -148,7 +175,8 @@ library and Nova's database are mounted).
 
 - **Update everything:** `~/lego/brickpipe/deploy/update.sh`. It
   fast-forwards brickpipe and the Nova fork, keeps the toolkit at `v0.6.0`,
-  rebuilds, restarts what changed and removes old images. Safe to re-run;
+  rebuilds, restarts what changed, and removes old images and build cache
+  older than a week. Safe to re-run;
   it stops without touching anything if a repo has local edits.
 - **Back up:** `~/lego/brickpipe/deploy/backup.sh` writes
   `~/lego/backups/brickpipe-backup-<date>-<time>.tar.gz` with brickpipe's
@@ -160,7 +188,8 @@ library and Nova's database are mounted).
   private (never in a shared folder or a public bucket). A nightly cron
   line: `15 3 * * * $HOME/lego/brickpipe/deploy/backup.sh >> $HOME/lego/backups/backup.log 2>&1`
 - **Add a family member:** add their email to the Access policy. Nothing to
-  restart.
+  restart. Only add people you trust with every key on the server (see
+  [Trust model](#trust-model)).
 - **Where things are:** runs in the `brickpipe_brickpipe-data` volume,
   Nova's agents and keys in the `brickpipe_nova-config` volume, Nova's
   chats and models under `~/lego/ldraw-nova-docker/data`.
@@ -179,7 +208,7 @@ library and Nova's database are mounted).
 | A container keeps restarting, `docker inspect` shows `OOMKilled: true` | memory limit too low | raise `NOVA_MEM_LIMIT` (or the others) in `deploy/.env`, run `update.sh` |
 | brickpipe opens but "Nova is not reachable" | Nova still building or crashed | `docker compose logs nova`; wait for the build |
 | Runs fail with "Environment variable ANTHROPIC_API_KEY is not set" | key missing from `deploy/.env`, or container not recreated | fill it in, run `update.sh` |
-| Runs fail with an authentication or billing error | key revoked, or its spend limit reached | Anthropic console: check the key and limit |
+| Runs fail with an authentication or billing error | key revoked, or the workspace's spend limit reached | Anthropic Console: check the key and the `brickpipe` workspace's limit |
 | Runs fail with "no model" or use the wrong account | Nova has no default agent | Nova > Settings: **Make default** on the Anthropic env-var agent (step 5) |
 | Nova's agents and family keys are gone after an update | the `brickpipe_nova-config` volume was removed | restore it from a backup (`backup.sh` header), or redo step 5 |
 | 3D viewer or "Open the Nova chat" shows a login page or fails | `nova.example.com` is not in the same Access application | add it as a second domain of the brickpipe application |

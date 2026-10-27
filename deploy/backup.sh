@@ -8,7 +8,9 @@
 #                    the LDraw library it downloaded is left out, it downloads again)
 #   nova-config/     Nova's model entries, API keys and Claude/ChatGPT sign-ins
 #                    (volume brickpipe_nova-config)
-#   nova-data/       Nova's chats and generated models (~/lego/ldraw-nova-docker/data)
+#   nova-data/       Nova's chats and generated models (~/lego/ldraw-nova-docker/data;
+#                    without each chat's workspace/.venv link to the image's
+#                    toolkit, which Nova recreates when the chat is next used)
 #
 # It CONTAINS SECRETS (keys and sign-in tokens): it is written mode 600, and
 # copies must be kept private. Settings, from the environment or deploy/.env:
@@ -87,6 +89,7 @@ docker run --rm --network none \
     "$IMAGE" sh -c '
         set -e
         tar -czpf "/backup/$1.partial" -C /src --exclude=brickpipe-data/brickpipe/ldraw \
+            --exclude="nova-data/chats/*/workspace/.venv" \
             brickpipe-data nova-config nova-data
         chown "$2" "/backup/$1.partial"
         chmod 600 "/backup/$1.partial"

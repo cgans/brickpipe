@@ -29,6 +29,11 @@ services:
     platform: linux/amd64   # LeoCAD ships x86_64-only builds
     init: true
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     mem_limit: ${NOVA_MEM_LIMIT:-3g}
     volumes:
       # Chats, generated models and agents' work folders.
@@ -63,6 +68,11 @@ services:
     image: brickpipe
     container_name: brickpipe
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     mem_limit: ${BRICKPIPE_MEM_LIMIT:-1g}
     depends_on:
       nova:
@@ -93,6 +103,11 @@ services:
     image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2026.9.3}
     container_name: brickpipe-tunnel
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
     mem_limit: ${TUNNEL_MEM_LIMIT:-256m}
     command: tunnel --no-autoupdate run
     environment:
