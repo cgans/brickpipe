@@ -55,6 +55,22 @@ the files and the token total then cover the changed model. You can repeat
 this as often as you like. If the agent answers without delivering a new
 model, the page says so and the last result stays.
 
+### Earlier runs: run again, delete, history
+
+The sidebar lists as many earlier runs as fit the window. "All runs (N)"
+under it opens the History view (also at `#history`), which lists every run
+and can be filtered by what was asked or by result.
+
+- **Run again** starts the same request as a new run. A run that began
+  from a prompt gets a fresh Nova chat, so a failed design does not carry
+  over. A run that began from an existing model checks that model again.
+  Changes made after the first result are not repeated. The old run is
+  kept, and each links to the other. A failed run shows the button
+  highlighted at the top right.
+- **Delete** (× in the sidebar, or Delete in History) removes the run and
+  its files from brickpipe after a confirmation. The chat stays in Nova.
+  A run that is still going cannot be deleted; stop it first.
+
 ### Whose AI account runs the agent
 
 Settings > AI account on the page: "Use the host's account" (Nova's default

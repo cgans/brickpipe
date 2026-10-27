@@ -222,6 +222,75 @@ class WebTests(unittest.TestCase):
         self.assertEqual(run["rounds"], rounds_before)
         self.assertTrue(run["result"]["clean"])
 
+    def test_rerun_a_failed_run_in_a_new_chat(self):
+        self.fake.fail_turn = True
+        try:
+            status, run = http("POST", f"{self.base}/api/runs", {"prompt": "a barn", "rounds": 2})
+            run = self.wait_done(run["id"])
+        finally:
+            self.fake.fail_turn = False
+        self.assertEqual(run["status"], "failed")
+        first_chat = run["chat_id"]
+
+        status, new = http("POST", f"{self.base}/api/runs/{run['id']}/rerun", {"effort": "low"})
+        self.assertEqual(status, 202)
+        self.assertNotEqual(new["id"], run["id"])
+        self.assertEqual(new["rerun_of"], run["id"])
+        self.assertEqual(new["request"]["prompt"], "a barn")
+        self.assertEqual(new["request"]["rounds"], 2)
+        new = self.wait_done(new["id"])
+        self.assertEqual(new["status"], "done")
+        self.assertTrue(new["result"]["clean"])
+        self.assertNotEqual(new["chat_id"], first_chat)  # a fresh Nova chat
+        status, old = http("GET", f"{self.base}/api/runs/{run['id']}")
+        self.assertEqual(old["rerun_as"], new["id"])
+
+    def test_rerun_and_delete_refuse_a_run_in_progress(self):
+        status, run = http("POST", f"{self.base}/api/runs", {"prompt": "a tower"})
+        status, body = http("POST", f"{self.base}/api/runs/{run['id']}/delete")
+        self.assertEqual(status, 409)
+        status, body = http("POST", f"{self.base}/api/runs/{run['id']}/rerun")
+        self.assertEqual(status, 409)
+        self.wait_done(run["id"])
+        status, body = http("POST", f"{self.base}/api/runs/nope/delete")
+        self.assertEqual(status, 404)
+
+    def test_delete_a_run(self):
+        status, run = http("POST", f"{self.base}/api/runs", {"chat_id": "latest", "rounds": 0})
+        self.wait_done(run["id"])
+        folder = Path(self.tmp.name) / "runs" / run["id"]
+        self.assertTrue(folder.is_dir())
+        status, body = http("POST", f"{self.base}/api/runs/{run['id']}/delete")
+        self.assertEqual((status, body), (200, {"deleted": run["id"]}))
+        self.assertFalse(folder.exists())
+        status, body = http("GET", f"{self.base}/api/runs/{run['id']}")
+        self.assertEqual(status, 404)
+        status, body = http("GET", f"{self.base}/api/runs?limit=0")
+        self.assertNotIn(run["id"], [r["id"] for r in body["runs"]])
+
+    def test_deleted_runs_stay_gone_after_a_restart(self):
+        runs_dir = Path(self.tmp.name) / "runs"
+        status, run = http("POST", f"{self.base}/api/runs", {"chat_id": "latest", "rounds": 0})
+        self.wait_done(run["id"])
+        http("POST", f"{self.base}/api/runs/{run['id']}/delete")
+        self.assertNotIn(run["id"], web.Runner(runs_dir).runs)
+
+    def test_listing_pages_and_counts(self):
+        for _ in range(3):
+            status, run = http("POST", f"{self.base}/api/runs", {"chat_id": "latest", "rounds": 0})
+            self.wait_done(run["id"])
+        status, everything = http("GET", f"{self.base}/api/runs?limit=0")
+        total = everything["total"]
+        self.assertEqual(len(everything["runs"]), total)
+        status, two = http("GET", f"{self.base}/api/runs?limit=2&offset=1")
+        self.assertEqual(two["total"], total)
+        self.assertEqual([r["id"] for r in two["runs"]], [r["id"] for r in everything["runs"][1:3]])
+        entry = two["runs"][0]
+        self.assertNotIn("log", entry)  # the listing is light
+        self.assertIn("status", entry)
+        status, bad = http("GET", f"{self.base}/api/runs?limit=lots")
+        self.assertEqual(status, 400)
+
     def test_history_lists_runs_newest_first(self):
         for _ in range(2):
             status, run = http("POST", f"{self.base}/api/runs", {"chat_id": "latest", "rounds": 0})

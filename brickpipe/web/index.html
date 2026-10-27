@@ -59,7 +59,7 @@ header {
 header p { max-width: 60ch; }
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; align-self: center; }
 .tabs .btn.on { background: var(--ink); color: var(--panel); border-color: var(--ink); }
-#settingsView { max-width: 1180px; margin: 0 auto; padding: 0 16px 40px; }
+#settingsView, #historyView { max-width: 1180px; margin: 0 auto; padding: 0 16px 40px; }
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; align-items: start; }
 .settings-grid .panel + .panel { margin-top: 0; }
 .settings-grid h2 { margin-bottom: 4px; }
@@ -176,6 +176,29 @@ ul.history li { padding: 8px 0; border-bottom: 1px solid var(--line); }
 ul.history li:last-child { border-bottom: 0; }
 ul.history button { background: none; border: 0; padding: 0; text-align: left; cursor: pointer; width: 100%; }
 ul.history button:hover b { text-decoration: underline; }
+ul.history li { display: flex; gap: 6px; align-items: flex-start; }
+ul.history li.on b { text-decoration: underline; }
+ul.history .open { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+ul.history .forget { width: auto; flex: none; color: var(--ink-2); font-size: 1.1rem; line-height: 1; padding: 2px 6px; border-radius: 6px; }
+ul.history .forget:hover { color: var(--bad); background: var(--panel-2); }
+.linkish { background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; color: var(--ink-2); font: inherit; }
+.all-runs { display: inline-block; margin-top: 10px; font-weight: 700; color: var(--ink); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline; }
+.phone-only { display: none; }
+.st-failed { color: var(--bad); }
+.st-clean { color: var(--good); }
+table.runs { width: 100%; border-collapse: collapse; margin-top: 14px; }
+table.runs th { text-align: left; font-weight: 400; color: var(--ink-2); padding: 6px 10px 6px 0; border-bottom: 1px solid var(--line); font-size: .9rem; }
+table.runs td { padding: 10px 10px 10px 0; border-bottom: 1px solid var(--line); vertical-align: middle; }
+table.runs td.what { overflow-wrap: anywhere; }
+table.runs td.acts { white-space: nowrap; text-align: right; }
+table.runs .btn { padding: 6px 10px; }
+@media (max-width: 700px) {
+  table.runs thead { display: none; }
+  table.runs tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  table.runs td { display: block; border: 0; padding: 2px 0; }
+  table.runs td.acts { text-align: left; margin-top: 6px; }
+  .phone-only { display: inline; }
+}
 
 .empty { padding: 30px 10px; text-align: center; }
 .brick { display: grid; grid-template-columns: repeat(4, 18px); gap: 8px; justify-content: center; padding: 14px; margin: 0 auto 16px; width: max-content; background: var(--stud); border-radius: 6px; box-shadow: inset 0 -5px 0 var(--stud-edge); }
@@ -193,6 +216,7 @@ ul.history button:hover b { text-decoration: underline; }
   </div>
   <nav class="tabs" aria-label="Views">
     <button class="btn quiet on" id="tabBuild" type="button" aria-pressed="true">Build</button>
+    <button class="btn quiet" id="tabHistory" type="button" aria-pressed="false">History</button>
     <button class="btn quiet" id="tabSettings" type="button" aria-pressed="false">Settings</button>
     <button class="btn quiet" id="themeBtn" type="button" title="Switch light and dark">Theme</button>
   </nav>
@@ -260,6 +284,7 @@ ul.history button:hover b { text-decoration: underline; }
     <div class="panel">
       <h2>Earlier runs</h2>
       <ul class="history" id="history"><li class="muted small">None yet.</li></ul>
+      <button type="button" class="all-runs" id="allRuns" hidden></button>
     </div>
   </section>
 
@@ -279,8 +304,10 @@ ul.history button:hover b { text-decoration: underline; }
         <div>
           <h2 id="runTitle"></h2>
           <p class="small muted" id="runMeta"></p>
+          <p class="small" id="rerunNote" hidden></p>
         </div>
         <div class="row">
+          <button class="btn quiet" id="rerunBtn" type="button" hidden>Run again</button>
           <a class="btn quiet" id="chatLink" href="#" target="_blank" rel="noreferrer" hidden>Open the Nova chat</a>
           <button class="btn quiet danger" id="stopBtn" type="button" hidden>Stop after this step</button>
         </div>
@@ -324,6 +351,28 @@ ul.history button:hover b { text-decoration: underline; }
     </div>
   </section>
 </main>
+
+<section id="historyView" hidden>
+  <div class="panel">
+    <h2>All runs</h2>
+    <p class="small muted">Open one to see its rounds and files. Deleting a run removes it and its files from brickpipe; the chat stays in Nova.</p>
+    <div class="row" style="margin-top:12px">
+      <input type="text" class="grow" id="historyFilter" placeholder="Find a run by what was asked" aria-label="Find a run">
+      <select id="historyStatus" style="width:auto" aria-label="Show">
+        <option value="">Every status</option>
+        <option value="clean">Clean</option>
+        <option value="stopped">Stopped</option>
+        <option value="failed">Failed</option>
+        <option value="live">Running</option>
+      </select>
+    </div>
+    <table class="runs">
+      <thead><tr><th>What was asked</th><th>Started</th><th>Rounds</th><th>Result</th><th></th></tr></thead>
+      <tbody id="historyRows"></tbody>
+    </table>
+    <p class="small muted" id="historyCount"></p>
+  </div>
+</section>
 
 <section id="settingsView" hidden>
   <div class="settings-grid">
@@ -487,18 +536,20 @@ ul.history button:hover b { text-decoration: underline; }
 
   // views
   function showView(name) {
-    const settings = name === 'settings';
-    document.querySelector('main').hidden = settings;
-    $('settingsView').hidden = !settings;
-    for (const [id, on] of [['tabBuild', !settings], ['tabSettings', settings]]) {
-      $(id).classList.toggle('on', on); $(id).setAttribute('aria-pressed', String(on));
+    document.querySelector('main').hidden = name !== 'build';
+    $('settingsView').hidden = name !== 'settings';
+    $('historyView').hidden = name !== 'history';
+    for (const [id, view] of [['tabBuild', 'build'], ['tabHistory', 'history'], ['tabSettings', 'settings']]) {
+      $(id).classList.toggle('on', name === view); $(id).setAttribute('aria-pressed', String(name === view));
     }
-    if (history.replaceState) history.replaceState(null, '', settings ? '#settings' : location.pathname);
-    if (settings) { const first = $('settingsView').querySelector('input'); if (first) first.focus({ preventScroll: true }); }
+    if (history.replaceState) history.replaceState(null, '', name === 'build' ? location.pathname : '#' + name);
+    if (name === 'settings') { const first = $('settingsView').querySelector('input'); if (first) first.focus({ preventScroll: true }); }
+    if (name === 'history') loadAllRuns();
+    if (name === 'build') fitHistory();
   }
   $('tabBuild').onclick = () => showView('build');
+  $('tabHistory').onclick = () => showView('history');
   $('tabSettings').onclick = () => showView('settings');
-  if (location.hash === '#settings') showView('settings');
 
   // what the current settings leave out, shown under the run button
   function settingsHint() {
@@ -714,14 +765,102 @@ ul.history button:hover b { text-decoration: underline; }
     }
   });
 
-  // history
+  // history: the sidebar shows as many runs as fit the window; the rest are on the History view
+  const SIDEBAR_FETCH = 40;
+  let sidebarRuns = [], runsTotal = 0, allRuns = [];
   async function loadHistory() {
-    const { runs } = await api('/api/runs');
-    if (!runs.length) return;
-    $('history').innerHTML = runs.map(r => `<li><button type="button" data-id="${r.id}">
-      <b>${esc(title(r))}</b><br><span class="small muted">${esc(when(r.started_at))} · ${esc(summary(r))}</span></button></li>`).join('');
-    $('history').querySelectorAll('button').forEach(b => b.onclick = async () => show(await api('/api/runs/' + b.dataset.id)));
+    const data = await api('/api/runs?limit=' + SIDEBAR_FETCH);
+    sidebarRuns = data.runs; runsTotal = data.total;
+    fitHistory();
+    if (!$('historyView').hidden) loadAllRuns();
   }
+  async function openRun(id) {
+    showView('build');
+    show(await api('/api/runs/' + id));
+    if (window.innerWidth <= 860) $('sheet').scrollIntoView({ behavior: 'smooth' });
+  }
+  async function deleteRun(r) {
+    if (!confirm(`Delete "${title(r)}"?\n\nIts rounds and files are removed from brickpipe. The chat stays in Nova.`)) return;
+    try {
+      await api('/api/runs/' + r.id + '/delete', { method: 'POST' });
+    } catch (err) { toast(err.message); return; }
+    if (current && current.id === r.id) {
+      if (source) { source.close(); source = null; }
+      current = null; $('runSheet').hidden = true; $('emptySheet').hidden = false;
+    }
+    toast('Deleted');
+    loadHistory();
+  }
+  async function rerunRun(id) {
+    try {
+      const run = await api('/api/runs/' + id + '/rerun', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(runSettings()) });
+      showView('build'); show(run); loadHistory();
+    } catch (err) { toast(err.message); }
+  }
+  const finished = r => ['done', 'failed', 'stopped'].includes(r.status);
+  function historyItem(r) {
+    return `<li class="${current && current.id === r.id ? 'on' : ''}">
+      <button type="button" class="open" data-id="${r.id}"><b>${esc(title(r))}</b><br>
+        <span class="small muted">${esc(when(r.started_at))} · <span class="${statusClass(r)}">${esc(summary(r))}</span></span></button>
+      ${finished(r) ? `<button type="button" class="forget" data-forget="${r.id}" title="Delete this run" aria-label="Delete ${esc(title(r))}">×</button>` : ''}</li>`;
+  }
+  function wireRunButtons(root, list) {
+    root.querySelectorAll('[data-id]').forEach(b => b.onclick = () => openRun(b.dataset.id));
+    root.querySelectorAll('[data-forget]').forEach(b => b.onclick = () => deleteRun(list.find(r => r.id === b.dataset.forget)));
+    root.querySelectorAll('[data-rerun]').forEach(b => b.onclick = () => rerunRun(b.dataset.rerun));
+  }
+  function fitHistory() {
+    const ul = $('history'), more = $('allRuns');
+    if (!sidebarRuns.length) { ul.innerHTML = '<li class="muted small">None yet.</li>'; more.hidden = true; return; }
+    ul.innerHTML = sidebarRuns.map(historyItem).join('');
+    wireRunButtons(ul, sidebarRuns);
+    // drop runs from the end until the list ends inside the window (keep at least three)
+    const items = [...ul.children];
+    const room = window.innerHeight - 56;  // leave space for the "All runs" link
+    const top = ul.getBoundingClientRect().top + window.scrollY;
+    let shown = items.length;
+    if (top < window.innerHeight) {
+      while (shown > 3 && items[shown - 1].getBoundingClientRect().bottom + window.scrollY > Math.max(room, top + 200)) {
+        items[--shown].remove();
+      }
+    } else {
+      while (shown > 5) items[--shown].remove();  // narrow screens: the list sits below the form
+    }
+    more.hidden = runsTotal <= shown;
+    more.textContent = `All runs (${runsTotal}) →`;
+  }
+  $('allRuns').onclick = () => showView('history');
+  let fitTimer;
+  window.addEventListener('resize', () => { clearTimeout(fitTimer); fitTimer = setTimeout(() => { if (!document.querySelector('main').hidden) fitHistory(); }, 150); });
+
+  async function loadAllRuns() {
+    const data = await api('/api/runs?limit=0');
+    allRuns = data.runs; runsTotal = data.total;
+    renderAllRuns();
+  }
+  function renderAllRuns() {
+    const q = $('historyFilter').value.trim().toLowerCase();
+    const want = $('historyStatus').value;
+    const list = allRuns.filter(r => (!q || title(r).toLowerCase().includes(q))
+      && (!want || (want === 'clean' ? r.result && r.result.clean : want === 'live' ? !finished(r)
+        : want === 'stopped' ? (r.status === 'stopped' || (r.status === 'done' && !(r.result && r.result.clean))) : r.status === want)));
+    $('historyRows').innerHTML = list.length ? list.map(r => `<tr>
+      <td class="what"><button type="button" class="btn quiet" style="padding:0;border:0;background:none;text-align:left" data-id="${r.id}"><b>${esc(title(r))}</b></button>
+        ${r.changes ? `<br><span class="small muted">${r.changes} change${r.changes > 1 ? 's' : ''} after the first result</span>` : ''}
+        ${r.rerun_of ? `<br><span class="small muted">run again from an earlier run</span>` : ''}
+        ${r.rerun_as ? `<br><span class="small muted">run again since</span>` : ''}</td>
+      <td class="small">${esc(when(r.started_at))}</td>
+      <td class="small">${r.rounds}<span class="phone-only"> round${r.rounds === 1 ? '' : 's'}</span></td>
+      <td class="small"><span class="${statusClass(r)}">${esc(summary(r))}</span>${r.status === 'failed' && r.error ? `<br><span class="muted">${esc(clip(r.error, 90))}</span>` : ''}</td>
+      <td class="acts">${finished(r) ? `<button type="button" class="btn quiet small" data-rerun="${r.id}">Run again</button>
+        <button type="button" class="btn quiet small danger" data-forget="${r.id}">Delete</button>` : '<span class="small muted">running</span>'}</td>
+    </tr>`).join('') : `<tr><td colspan="5" class="muted small">${allRuns.length ? 'No run matches.' : 'No runs yet.'}</td></tr>`;
+    wireRunButtons($('historyRows'), list);
+    $('historyCount').textContent = list.length === allRuns.length ? `${allRuns.length} run${allRuns.length === 1 ? '' : 's'}` : `${list.length} of ${allRuns.length} runs`;
+  }
+  $('historyFilter').addEventListener('input', renderAllRuns);
+  $('historyStatus').addEventListener('change', renderAllRuns);
+  const statusClass = r => r.status === 'failed' ? 'st-failed' : r.result && r.result.clean ? 'st-clean' : '';
   const title = r => r.request.prompt ? clip(r.request.prompt, 80) : (r.request.model_file || 'Newest model in ' + (r.request.chat_id || 'the latest chat'));
   const duration = s => s < 60 ? Math.round(s) + ' s' : s < 3600 ? Math.floor(s / 60) + ' min ' + String(Math.round(s % 60)).padStart(2, '0') + ' s' : Math.floor(s / 3600) + ' h ' + Math.floor((s % 3600) / 60) + ' min';
   const elapsed = run => {
@@ -764,6 +903,7 @@ ul.history button:hover b { text-decoration: underline; }
       source.addEventListener('finished', e => { render(current = JSON.parse(e.data)); source.close(); source = null; loadHistory(); loadNova(); });
     }
   }
+  $('rerunBtn').onclick = () => { if (current) rerunRun(current.id); };
   $('stopBtn').onclick = async () => { if (current) { await api('/api/runs/' + current.id + '/stop', { method: 'POST' }); toast('Stopping after the current step'); } };
 
   function render(run) {
@@ -771,6 +911,15 @@ ul.history button:hover b { text-decoration: underline; }
     $('runMeta').textContent = 'Started ' + when(run.started_at) + ' · ' + elapsed(run) + (run.request.availability ? '' : ' · availability not checked (no Rebrickable key)');
     const live = !['done', 'failed', 'stopped'].includes(run.status);
     $('stopBtn').hidden = !live;
+    $('rerunBtn').hidden = live;
+    $('rerunBtn').textContent = run.request.prompt ? 'Run again in a new chat' : 'Check again';
+    $('rerunBtn').classList.toggle('primary', run.status === 'failed');
+    const notes = [];
+    if (run.rerun_of) notes.push(`<button type="button" class="linkish" data-goto="${run.rerun_of}">Run again from an earlier run</button>`);
+    if (run.rerun_as) notes.push(`<button type="button" class="linkish" data-goto="${run.rerun_as}">This was run again; open the newer run</button>`);
+    $('rerunNote').hidden = !notes.length; $('rerunNote').innerHTML = notes.join(' · ');
+    $('rerunNote').querySelectorAll('[data-goto]').forEach(b => b.onclick = () => openRun(b.dataset.goto).catch(() => toast('That run was deleted')));
+    document.querySelectorAll('#history li').forEach(li => li.classList.toggle('on', !!li.querySelector(`[data-id="${run.id}"]`)));
     $('chatLink').hidden = !run.chat_url; if (run.chat_url) $('chatLink').href = run.chat_url;
     const st = $('runStatus'); st.className = 'status ' + (live ? 'live' : run.status === 'done' && run.result && run.result.clean ? 'done' : run.status === 'failed' ? 'failed' : '');
     $('statusText').textContent = {
@@ -805,7 +954,7 @@ ul.history button:hover b { text-decoration: underline; }
       const clean = run.result && run.result.clean;
       o.className = 'outcome ' + (run.status === 'failed' ? 'failed' : clean ? 'clean' : 'stopped');
       o.innerHTML = run.status === 'failed'
-        ? `<b>The run failed.</b> ${esc(run.error || '')}`
+        ? `<b>The run failed.</b> ${esc(run.error || '')}<br><span class="small">${run.request.prompt ? '"Run again in a new chat" (top right) starts the same request over in a fresh Nova chat.' : '"Check again" (top right) starts the check over.'}</span>`
         : clean ? `<b>Every piece in this model can be bought.</b> Final model: ${esc(run.result.final_model || '')}.` + ownedLine(run) + priceLine(run) + connectivityLine(run) + tokensLine(run) + viewerBox(run)
         : `<b>Stopped before the model was clean.</b> ${esc(run.result ? run.result.reason : '')} The files below are for the last model checked.` + ownedLine(run) + priceLine(run) + connectivityLine(run) + tokensLine(run);
     } else { o.hidden = true; }
@@ -982,6 +1131,9 @@ ul.history button:hover b { text-decoration: underline; }
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   loadSettings().then(() => { loadNova(); loadHistory(); });
+  if (location.hash === '#settings') showView('settings');
+  if (location.hash === '#history') showView('history');
+  window.addEventListener('hashchange', () => showView(['#settings', '#history'].includes(location.hash) ? location.hash.slice(1) : 'build'));
 })();
 </script>
 </body>
