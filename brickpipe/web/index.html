@@ -561,7 +561,8 @@ ul.history button:hover b { text-decoration: underline; }
       const def = (acc.models || []).find(m => m.id === acc.default_id);
       $('aiHostNote').textContent = def ? `Currently ${def.name}${def.auth_mode === 'browser' ? ' (signed in)' : ''}.` : 'Nova has no default model yet; add one in Nova or bring your own key.';
       const saved = store.get('llm_model_id', '');
-      if (saved && !(acc.models || []).some(m => m.id === saved)) { store.set('llm_model_id', ''); store.set('llm_model_name', ''); store.set('llm_model_token', ''); $('aiHost').checked = true; }
+      // Not listed can mean gone or just unusable now; keep it so Forget (which knows) can remove it.
+      if (saved && !(acc.models || []).some(m => m.id === saved)) { $('aiHost').checked = true; $('aiError').textContent = 'Your saved key isn\'t available right now. Forget removes it.'; }
     } catch (e) { $('aiHostNote').textContent = ''; }
     aiModels(); aiRender();
   }
