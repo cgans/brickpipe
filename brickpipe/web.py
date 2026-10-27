@@ -19,7 +19,6 @@ import mimetypes
 import queue
 import re
 import secrets
-import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -214,7 +213,8 @@ class OwnKeyTokens:
 
     def _save(self, data: dict) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(prefix=".own-keys-", dir=self.path.parent)
+        tmp = self.path.with_name(self.path.name + ".tmp")  # callers hold self.lock
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         try:
             os.fchmod(fd, 0o600)
             with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -672,8 +672,18 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "A model and a key are needed."}, 400)
             def add(agent):
                 entry_id = agent.add_llm_model(model, key, name or f"{model} (own key)")["id"]
-                return {"id": entry_id, "token": self.key_tokens.issue(entry_id)}
-            return self.proxy_nova(add)
+                try:
+                    return {"id": entry_id, "token": self.key_tokens.issue(entry_id)}
+                except OSError:
+                    try:
+                        agent.delete_llm_model(entry_id)  # don't leave an entry nobody can remove
+                    except nova.NovaError:
+                        pass
+                    raise
+            try:
+                return self.proxy_nova(add)
+            except OSError:
+                return self.send_json({"error": "brickpipe couldn't save this key on the server. Nothing was kept; try again."}, 500)
         m = re.fullmatch(r"/api/nova/llm-models/([\w-]+)/delete", path)
         if m:
             return self.delete_llm_model(m.group(1), str(self.read_json().get("token") or ""))
@@ -736,21 +746,19 @@ class Handler(BaseHTTPRequestHandler):
         server only with the token handed out when this brickpipe added it.
         An entry Nova no longer has counts as removed."""
         def remove(agent):
-            listing = agent.llm_models()
-            if entry_id == listing.get("default_id"):
+            # default_id here is the entry runs fall back to when they name
+            # none (Nova's own default, or its first usable entry if that one
+            # is unusable); Nova doesn't expose its raw setting read-only.
+            if entry_id == agent.llm_models().get("default_id"):
                 raise PermissionError("The host's default AI account can't be removed from brickpipe.")
-            if not any(e.get("id") == entry_id for e in listing.get("models", [])):
+            if not agent.has_llm_model(entry_id):
                 self.key_tokens.forget(entry_id)
                 return {"deleted": True, "already_gone": True}
             if self.settings.get("locked") and not self.key_tokens.matches(entry_id, token):
                 raise PermissionError("Only the browser that added this key can remove it.")
-            try:
-                agent.delete_llm_model(entry_id)
-            except nova.NovaError as err:
-                if "HTTP 404" not in str(err):
-                    raise
+            gone_already = not agent.delete_llm_model(entry_id)
             self.key_tokens.forget(entry_id)
-            return {"deleted": True}
+            return {"deleted": True, **({"already_gone": True} if gone_already else {})}
         try:
             return self.proxy_nova(remove)
         except PermissionError as err:

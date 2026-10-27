@@ -335,7 +335,7 @@ class HostedOwnKeyTests(unittest.TestCase):
         self.assertNotIn("sk-secret-key", text)
         self.assertEqual(json.loads(text)[made["id"]], hashlib.sha256(made["token"].encode()).hexdigest())
         self.assertEqual(stat.S_IMODE(stored.stat().st_mode), 0o600)
-        self.assertEqual([p.name for p in self.runs.glob(".own-keys-*")], [])  # no temp files left behind
+        self.assertFalse((self.runs / "own-keys.json.tmp").exists())  # no temp file left behind
 
     def test_only_the_right_token_removes_an_entry(self):
         made = self.add()
@@ -363,6 +363,69 @@ class HostedOwnKeyTests(unittest.TestCase):
         status, gone = self.delete(made["id"], {})
         self.assertEqual((status, gone["deleted"]), (200, True))
         self.assertNotIn(made["id"], json.loads((self.runs / "own-keys.json").read_text()))
+
+    def test_entry_hidden_from_nova_list_is_still_removed_properly(self):
+        # Nova hides entries whose model it no longer supports; they still exist.
+        made = self.add()
+        self.fake.llm_entries[made["id"]]["unsupported"] = True
+        status, acc = http("GET", f"{self.base}/api/nova/llm-models")
+        self.assertNotIn(made["id"], [m["id"] for m in acc["models"]])
+        status, _ = self.delete(made["id"], {})
+        self.assertEqual(status, 403)  # not mistaken for "already gone"
+        self.assertIn(made["id"], json.loads((self.runs / "own-keys.json").read_text()))
+        status, gone = self.delete(made["id"], {"token": made["token"]})
+        self.assertEqual(status, 200)
+        self.assertNotIn("already_gone", gone)
+        self.assertNotIn(made["id"], self.fake.llm_entries)
+
+    def test_nova_deleted_false_counts_as_already_gone(self):
+        made = self.add()
+        real = self.fake.__call__
+        calls = []
+
+        def vanish_first(req):  # removed in Nova between our check and our delete
+            if req.get_method() == "DELETE" and not calls:
+                calls.append(1)
+                self.fake.llm_entries.pop(made["id"], None)
+            return real(req)
+        nova.Client.__init__, original = (lambda c, base_url=nova.DEFAULT_URL, opener=None, public_url=None:
+                                          type(self).original_init(c, base_url, vanish_first, public_url)), nova.Client.__init__
+        try:
+            status, gone = self.delete(made["id"], {"token": made["token"]})
+        finally:
+            nova.Client.__init__ = original
+        self.assertEqual((status, gone.get("already_gone")), (200, True))
+        self.assertNotIn(made["id"], json.loads((self.runs / "own-keys.json").read_text()))
+
+    def test_failed_token_save_removes_the_new_entry(self):
+        tokens = self.server.RequestHandlerClass.key_tokens
+        before = set(self.fake.llm_entries)
+
+        def broken(entry_id):
+            raise OSError("disk full")
+        tokens.issue = broken
+        try:
+            status, err = http("POST", f"{self.base}/api/nova/llm-models", {"model": "openai/gpt-6-luna", "api_key": "sk-x"})
+        finally:
+            del tokens.issue
+        self.assertEqual(status, 500)
+        self.assertIn("Nothing was kept", err["error"])
+        self.assertNotIn("sk-x", json.dumps(err))
+        self.assertEqual(set(self.fake.llm_entries), before)
+
+    def test_fallback_default_is_protected_when_novas_own_default_is_hidden(self):
+        # Runs with no entry named use Nova's first usable entry when its own
+        # default is unusable, so that entry is the one to protect.
+        self.add()  # so there is a usable entry to fall back to
+        self.fake.llm_entries["host"]["unsupported"] = True
+        try:
+            status, acc = http("GET", f"{self.base}/api/nova/llm-models")
+            fallback = acc["default_id"]
+            self.assertNotEqual(fallback, "host")
+            status, _ = self.delete(fallback, {"token": "anything"})
+            self.assertEqual(status, 403)
+        finally:
+            self.fake.llm_entries["host"].pop("unsupported")
 
     def test_default_entry_cannot_be_removed(self):
         status, err = self.delete("host", {})

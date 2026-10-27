@@ -64,7 +64,9 @@ person's runs are then billed to their key. The key goes once to Nova,
 which keeps it in its settings store; brickpipe keeps only the entry's id.
 On a hosted (locked) brickpipe only the browser that added a key can remove
 it: brickpipe hands that browser a removal token and keeps just its hash. The
-host's default entry can't be removed from brickpipe at all.
+host's default entry can't be removed from brickpipe at all. Keys added
+before this change have no token, so on a hosted server the host removes
+those in Nova directly.
 
 ### Hosting it for other people
 

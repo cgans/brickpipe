@@ -587,7 +587,7 @@ ul.history button:hover b { text-decoration: underline; }
       try {
         await api('/api/nova/llm-models/' + encodeURIComponent(id) + '/delete?nova_url=' + encodeURIComponent($('novaUrl').value.trim()), { method: 'POST',
           headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: store.get('llm_model_token', '') }) });
-      } catch (e) { if (e.status === 403) { $('aiError').textContent = e.message; return; } }
+      } catch (e) { $('aiError').textContent = e.message; return; }
     }
     store.set('llm_model_id', ''); store.set('llm_model_name', ''); store.set('llm_model_token', ''); aiRender();
   };

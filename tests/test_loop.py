@@ -64,11 +64,21 @@ class FakeNova:
                                "llm_model_id": (body or {}).get("llm_model_id")}
             self.models[cid] = []
             return self.json(self.chats[cid])
+        if path.startswith("/api/llm-models/") and path.endswith("/edit") and method == "GET":
+            eid = path.split("/")[3]
+            if eid not in self.llm_entries:  # Nova's route raises 404 here
+                raise urllib.error.HTTPError(req.full_url, 404, "not found", {}, io.BytesIO(b'{"detail":"not found"}'))
+            return self.json({"id": eid, "model_name": self.llm_entries[eid]["model_name"]})
         if path == "/api/llm-models" and method == "GET":
+            # Like Nova's builder list: unsupported entries are hidden, and the
+            # default falls back to the first listed one if it is hidden.
+            shown = {i: e for i, e in self.llm_entries.items() if not e.get("unsupported")}
+            default = getattr(self, "default_id", "host")
+            default = default if default in shown else next(iter(shown), None)
             return self.json({"models": [{"id": i, "model_name": e["model_name"], "auth_mode": "api_key",
                                           "litellm_params": {"model": e["model"], "api_key": "***"}}
-                                         for i, e in self.llm_entries.items()],
-                              "default_id": "host"})
+                                         for i, e in shown.items()],
+                              "default_id": default})
         if path == "/api/llm-models" and method == "POST":
             assert body["litellm_params"]["api_key"], "a key is required"
             self.entry_seq = getattr(self, "entry_seq", 0) + 1  # never reuse an id after a delete
