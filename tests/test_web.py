@@ -501,3 +501,133 @@ class HostedOwnKeyTests(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertIn("default", err["error"])
         self.assertIn("host", self.fake.llm_entries)
+
+
+class OwnKeyUseTests(unittest.TestCase):
+    """Locked: only the browser holding an entry's token can run on it.
+    Unlocked: nothing changes. The token is never kept with a run."""
+    locked = True
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.fake = FakeNova()
+        cls.original_init = nova.Client.__init__
+
+        def patched(self, base_url=nova.DEFAULT_URL, opener=None, public_url=None):
+            cls.original_init(self, base_url, cls.fake, public_url)
+        nova.Client.__init__ = patched
+        cls.runs = Path(cls.tmp.name) / "runs"
+        cls.server = web.make_server(0, cls.runs, nova_url="http://ldraw-nova-app:8000", nova_db="", locked=cls.locked)
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+        cls.base = f"http://127.0.0.1:{cls.server.server_address[1]}"
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        nova.Client.__init__ = cls.original_init
+        cls.tmp.cleanup()
+
+    def setUp(self):
+        status, self.mine = http("POST", f"{self.base}/api/nova/llm-models", {"model": "openai/gpt-6-luna", "api_key": "sk-mine"})
+        status, self.theirs = http("POST", f"{self.base}/api/nova/llm-models", {"model": "openai/gpt-6-luna", "api_key": "sk-theirs"})
+
+    def finished_run(self, **extra):
+        status, run = http("POST", f"{self.base}/api/runs", {"prompt": "a shed", **extra})
+        self.assertEqual(status, 202, run)
+        return self.wait(run)
+
+    def wait(self, run):  # one run at a time: the fake Nova is shared
+        for _ in range(100):
+            status, run = http("GET", f"{self.base}/api/runs/{run['id']}")
+            if run["status"] in ("done", "failed", "stopped"):
+                return run
+            time.sleep(0.05)
+        self.fail("run did not finish")
+
+    def refused(self):
+        return [{}, {"llm_model_token": "wrong"}, {"llm_model_token": self.theirs["token"]}]
+
+    def assert_token_not_kept(self, *run_ids):
+        token = self.mine["token"]
+        status, listing = http("GET", f"{self.base}/api/runs")
+        self.assertNotIn(token, json.dumps(listing))
+        for rid in run_ids:
+            status, run = http("GET", f"{self.base}/api/runs/{rid}")
+            self.assertNotIn(token, json.dumps(run))
+            self.assertNotIn("llm_model_token", (self.runs / rid / "state.json").read_text())
+            self.assertNotIn(token, (self.runs / rid / "state.json").read_text())
+
+    def test_new_run(self):
+        mine = {"llm_model_id": self.mine["id"]}
+        for extra in self.refused():
+            status, body = http("POST", f"{self.base}/api/runs", {"prompt": "a shed", **mine, **extra})
+            if self.locked:
+                self.assertEqual(status, 403, extra)
+                self.assertIn("someone else's browser", body["error"])
+            else:
+                self.assertEqual(status, 202, extra)
+                self.wait(body)
+        run = self.finished_run(**mine, llm_model_token=self.mine["token"])
+        self.assertEqual(self.fake.chats[run["chat_id"]]["llm_model_id"], self.mine["id"])
+        self.assert_token_not_kept(run["id"])
+        for extra in ({}, {"llm_model_id": ""}, {"llm_model_id": "host"}):  # host's account: no token needed
+            self.finished_run(**extra)
+
+    def test_entry_without_a_stored_token(self):
+        self.fake.llm_entries["old"] = {"model_name": "added before tokens", "model": "openai/gpt-6-luna", "key": "k"}
+        status, body = http("POST", f"{self.base}/api/runs", {"prompt": "a shed", "llm_model_id": "old", "llm_model_token": "x"})
+        self.assertEqual(status, 403 if self.locked else 202)
+        if status == 202:
+            self.wait(body)
+
+    def test_refine(self):
+        run = self.finished_run()
+        url = f"{self.base}/api/runs/{run['id']}/refine"
+        for extra in self.refused() if self.locked else []:
+            status, _ = http("POST", url, {"text": "taller", "llm_model_id": self.mine["id"], **extra})
+            self.assertEqual(status, 403, extra)
+        if not self.locked:  # unlocked: a refine without a token is accepted
+            status, _ = http("POST", url, {"text": "wider", "llm_model_id": self.mine["id"]})
+            self.assertEqual(status, 202)
+            self.wait(run)
+        status, body = http("POST", url, {"text": "taller", "llm_model_id": self.mine["id"],
+                                          "llm_model_token": self.mine["token"]})
+        self.assertEqual(status, 202, body)
+        for _ in range(100):
+            status, done = http("GET", f"{self.base}/api/runs/{run['id']}")
+            if done["status"] in ("done", "failed", "stopped"):
+                break
+            time.sleep(0.05)
+        self.assertEqual(done["request"]["llm_model_id"], self.mine["id"])
+        self.assert_token_not_kept(run["id"])
+
+    def test_rerun(self):
+        run = self.finished_run()
+        url = f"{self.base}/api/runs/{run['id']}/rerun"
+        for extra in self.refused():
+            status, body = http("POST", url, {"llm_model_id": self.mine["id"], **extra})
+            self.assertEqual(status, 403 if self.locked else 202, extra)
+            if status == 202:
+                self.wait(body)
+        status, new = http("POST", url, {"llm_model_id": self.mine["id"], "llm_model_token": self.mine["token"]})
+        self.assertEqual(status, 202, new)
+        self.wait(new)
+        status, again = http("POST", url, {})  # host's account, as the first run used
+        self.assertEqual(status, 202)
+        self.wait(again)
+        self.assert_token_not_kept(run["id"], new["id"], again["id"])
+
+    def test_rerun_of_a_run_on_someone_elses_key_needs_their_token(self):
+        run = self.finished_run(llm_model_id=self.theirs["id"], llm_model_token=self.theirs["token"])
+        status, body = http("POST", f"{self.base}/api/runs/{run['id']}/rerun", {})  # inherits their entry
+        self.assertEqual(status, 403 if self.locked else 202)
+        if status == 202:
+            self.wait(body)
+        status, body = http("POST", f"{self.base}/api/runs/{run['id']}/rerun", {"llm_model_id": ""})  # host's account
+        self.assertEqual(status, 202)
+        self.wait(body)
+
+
+class UnlockedOwnKeyUseTests(OwnKeyUseTests):
+    locked = False

@@ -82,7 +82,8 @@ On a hosted (locked) brickpipe only the browser that added a key can remove
 it: brickpipe hands that browser a removal token and keeps just its hash. The
 host's default entry can't be removed from brickpipe at all. Keys added
 before this change have no token, so on a hosted server the host removes
-those in Nova directly.
+those in Nova directly. Likewise, on a hosted brickpipe a key can only be
+used for runs by the browser that added it.
 
 ### Hosting it for other people
 

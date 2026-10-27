@@ -983,6 +983,7 @@ table.runs .btn { padding: 6px 10px; }
       rounds: Number($('rounds').value) || 3, effort: $('effort').value, rebrickable_key: $('rebrickableKey').value.trim(),
       owned_text: $('ownedText').value.trim(), rebrickable_user_token: store.get('rebrickable_user_token', ''),
       llm_model_id: $('aiOwn').checked ? store.get('llm_model_id', '') : '',
+      llm_model_token: $('aiOwn').checked ? store.get('llm_model_token', '') : '',
       bricklink: flags.prices && blComplete() ? blCreds() : null, price_region: $('priceRegion').value, price_currency: $('priceCurrency').value.trim().toUpperCase(),
       price_condition: $('priceCondition').value, price_guide: $('priceGuide').value,
     };
