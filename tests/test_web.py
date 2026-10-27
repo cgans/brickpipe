@@ -629,5 +629,24 @@ class OwnKeyUseTests(unittest.TestCase):
         self.wait(body)
 
 
+    def test_own_key_that_became_the_fallback_default_still_needs_its_token(self):
+        # Nova's stored default unusable: its list falls back to the first usable entry.
+        self.fake.llm_entries["host"]["unsupported"] = True
+        try:
+            for eid in list(self.fake.llm_entries):
+                if eid not in ("host", self.mine["id"]):
+                    self.fake.llm_entries[eid]["unsupported"] = True
+            status, acc = http("GET", f"{self.base}/api/nova/llm-models")
+            self.assertEqual(acc["default_id"], self.mine["id"])
+            status, _ = http("POST", f"{self.base}/api/runs", {"prompt": "a shed", "llm_model_id": self.mine["id"]})
+            self.assertEqual(status, 403 if self.locked else 202)
+            if status == 202:
+                self.wait(_)
+            self.finished_run(llm_model_id=self.mine["id"], llm_model_token=self.mine["token"])
+        finally:
+            for e in self.fake.llm_entries.values():
+                e.pop("unsupported", None)
+
+
 class UnlockedOwnKeyUseTests(OwnKeyUseTests):
     locked = False

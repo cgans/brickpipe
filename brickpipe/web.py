@@ -257,6 +257,10 @@ class OwnKeyTokens:
             stored = self._load().get(entry_id)
         return bool(stored and token) and hmac.compare_digest(stored, self._hash(token))
 
+    def known(self, entry_id: str) -> bool:
+        with self.lock:
+            return entry_id in self._load()
+
     def forget(self, entry_id: str) -> None:
         with self.lock:
             data = self._load()
@@ -847,7 +851,11 @@ class Handler(BaseHTTPRequestHandler):
         except nova.NovaError as err:
             self.send_json({"error": str(err)}, 502)
             return True
-        if entry_id == default_id or self.key_tokens.matches(str(entry_id), str(token or "")):
+        # The default needs no token only if it isn't someone's own key: Nova
+        # falls back to its first usable entry, which can be one added here.
+        if entry_id == default_id and not self.key_tokens.known(str(entry_id)):
+            return False
+        if self.key_tokens.matches(str(entry_id), str(token or "")):
             return False
         self.send_json({"error": "This key belongs to someone else's browser, or was removed. "
                                  "Choose the host's account or add your own key in Settings."}, 403)
