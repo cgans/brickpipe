@@ -85,6 +85,10 @@ main() {
     case "$(setting TUNNEL_TOKEN '')" in
         ""|paste-the-tunnel-token-here) die "set TUNNEL_TOKEN in $ENV_FILE first." ;;
     esac
+    case "$(setting ANTHROPIC_API_KEY '')" in
+        ""|sk-ant-replace-with-your-key)
+            printf 'update.sh: warning: ANTHROPIC_API_KEY is not set in %s; Nova has no default key.\n' "$ENV_FILE" >&2 ;;
+    esac
 
     say "Updating brickpipe in $BRICKPIPE_DIR"
     no_local_edits "$BRICKPIPE_DIR"
