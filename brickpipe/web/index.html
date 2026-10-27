@@ -390,9 +390,9 @@ ul.history button:hover b { text-decoration: underline; }
           </div>
           <div class="row">
             <button class="btn quiet small" id="aiSave" type="button">Save to Nova</button>
-            <span class="err small" id="aiError"></span>
           </div>
         </div>
+        <span class="err small" id="aiError"></span>
       </div>
     </div>
 
@@ -465,7 +465,7 @@ ul.history button:hover b { text-decoration: underline; }
   const $ = id => document.getElementById(id);
   const api = (path, opts) => fetch(path, opts).then(async r => {
     const data = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(data.error || r.statusText);
+    if (!r.ok) throw Object.assign(new Error(data.error || r.statusText), { status: r.status });
     return data;
   });
   const store = {
@@ -561,7 +561,7 @@ ul.history button:hover b { text-decoration: underline; }
       const def = (acc.models || []).find(m => m.id === acc.default_id);
       $('aiHostNote').textContent = def ? `Currently ${def.name}${def.auth_mode === 'browser' ? ' (signed in)' : ''}.` : 'Nova has no default model yet; add one in Nova or bring your own key.';
       const saved = store.get('llm_model_id', '');
-      if (saved && !(acc.models || []).some(m => m.id === saved)) { store.set('llm_model_id', ''); store.set('llm_model_name', ''); $('aiHost').checked = true; }
+      if (saved && !(acc.models || []).some(m => m.id === saved)) { store.set('llm_model_id', ''); store.set('llm_model_name', ''); store.set('llm_model_token', ''); $('aiHost').checked = true; }
     } catch (e) { $('aiHostNote').textContent = ''; }
     aiModels(); aiRender();
   }
@@ -576,14 +576,20 @@ ul.history button:hover b { text-decoration: underline; }
       const name = `${model.split('/').slice(1).join('/')} (own key)`;
       const r = await api('/api/nova/llm-models?nova_url=' + encodeURIComponent($('novaUrl').value.trim()), { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model, api_key: key, name }) });
-      store.set('llm_model_id', r.id); store.set('llm_model_name', name); $('aiKey').value = ''; aiRender();
+      store.set('llm_model_id', r.id); store.set('llm_model_token', r.token || ''); store.set('llm_model_name', name); $('aiKey').value = ''; aiRender();
     } catch (e) { $('aiError').textContent = e.message; }
     finally { $('aiSave').disabled = false; }
   };
   $('aiForget').onclick = async () => {
+    $('aiError').textContent = '';
     const id = store.get('llm_model_id', '');
-    if (id) { try { await api('/api/nova/llm-models/' + encodeURIComponent(id) + '/delete?nova_url=' + encodeURIComponent($('novaUrl').value.trim()), { method: 'POST' }); } catch {} }
-    store.set('llm_model_id', ''); store.set('llm_model_name', ''); aiRender();
+    if (id) {
+      try {
+        await api('/api/nova/llm-models/' + encodeURIComponent(id) + '/delete?nova_url=' + encodeURIComponent($('novaUrl').value.trim()), { method: 'POST',
+          headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: store.get('llm_model_token', '') }) });
+      } catch (e) { if (e.status === 403) { $('aiError').textContent = e.message; return; } }
+    }
+    store.set('llm_model_id', ''); store.set('llm_model_name', ''); store.set('llm_model_token', ''); aiRender();
   };
   const priceFields = [['blConsumerKey', 'bl_consumer_key'], ['blConsumerSecret', 'bl_consumer_secret'], ['blToken', 'bl_token'], ['blTokenSecret', 'bl_token_secret'],
     ['priceRegion', 'price_region'], ['priceCurrency', 'price_currency'], ['priceCondition', 'price_condition'], ['priceGuide', 'price_guide']];

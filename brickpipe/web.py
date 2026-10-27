@@ -11,12 +11,15 @@ server holds it in memory for that run only and never writes it to disk.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import mimetypes
 import queue
 import re
 import secrets
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -184,6 +187,64 @@ def tokens_sum(parts: list[dict | None]) -> dict | None:
     out["cost_usd"] = round(sum(costs), 4) if costs else None
     out["turns"] = len(parts)
     return out
+
+
+class OwnKeyTokens:
+    """Removal tokens for AI-account entries added through brickpipe.
+
+    Adding an own-key entry hands its browser a random token; only that
+    token's SHA-256 is kept here, per entry id, in a small JSON file (mode
+    0600, written atomically). A locked server deletes an entry only when the
+    caller shows the matching token."""
+
+    def __init__(self, path: Path):
+        self.path = path
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def _hash(token: str) -> str:
+        return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+    def _load(self) -> dict:
+        try:
+            data = json.loads(self.path.read_text("utf-8"))
+        except (OSError, ValueError):
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _save(self, data: dict) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(prefix=".own-keys-", dir=self.path.parent)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            os.replace(tmp, self.path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+    def issue(self, entry_id: str) -> str:
+        token = secrets.token_urlsafe(32)
+        with self.lock:
+            data = self._load()
+            data[entry_id] = self._hash(token)
+            self._save(data)
+        return token
+
+    def matches(self, entry_id: str, token: str) -> bool:
+        with self.lock:
+            stored = self._load().get(entry_id)
+        return bool(stored and token) and hmac.compare_digest(stored, self._hash(token))
+
+    def forget(self, entry_id: str) -> None:
+        with self.lock:
+            data = self._load()
+            if data.pop(entry_id, None) is not None:
+                self._save(data)
 
 
 class Runner:
@@ -609,11 +670,13 @@ class Handler(BaseHTTPRequestHandler):
             model, key, name = (body.get("model") or "").strip(), (body.get("api_key") or "").strip(), (body.get("name") or "").strip()
             if not (model and key):
                 return self.send_json({"error": "A model and a key are needed."}, 400)
-            return self.proxy_nova(lambda agent: {
-                "id": agent.add_llm_model(model, key, name or f"{model} (own key)")["id"]})
+            def add(agent):
+                entry_id = agent.add_llm_model(model, key, name or f"{model} (own key)")["id"]
+                return {"id": entry_id, "token": self.key_tokens.issue(entry_id)}
+            return self.proxy_nova(add)
         m = re.fullmatch(r"/api/nova/llm-models/([\w-]+)/delete", path)
         if m:
-            return self.proxy_nova(lambda agent: (agent.delete_llm_model(m.group(1)), {"deleted": True})[1])
+            return self.delete_llm_model(m.group(1), str(self.read_json().get("token") or ""))
         if path == "/api/runs":
             body = self.read_json()
             if not (body.get("prompt") or body.get("chat_id") or body.get("model_file")):
@@ -667,6 +730,31 @@ class Handler(BaseHTTPRequestHandler):
 
         threading.Thread(target=work, daemon=True).start()
         return self.send_json(state, 202)
+
+    def delete_llm_model(self, entry_id: str, token: str):
+        """Remove an AI-account entry. Never Nova's default; on a locked
+        server only with the token handed out when this brickpipe added it.
+        An entry Nova no longer has counts as removed."""
+        def remove(agent):
+            listing = agent.llm_models()
+            if entry_id == listing.get("default_id"):
+                raise PermissionError("The host's default AI account can't be removed from brickpipe.")
+            if not any(e.get("id") == entry_id for e in listing.get("models", [])):
+                self.key_tokens.forget(entry_id)
+                return {"deleted": True, "already_gone": True}
+            if self.settings.get("locked") and not self.key_tokens.matches(entry_id, token):
+                raise PermissionError("Only the browser that added this key can remove it.")
+            try:
+                agent.delete_llm_model(entry_id)
+            except nova.NovaError as err:
+                if "HTTP 404" not in str(err):
+                    raise
+            self.key_tokens.forget(entry_id)
+            return {"deleted": True}
+        try:
+            return self.proxy_nova(remove)
+        except PermissionError as err:
+            return self.send_json({"error": str(err)}, 403)
 
     def proxy_nova(self, fn):
         nova_url = parse_qs(urlparse(self.path).query).get("nova_url", [nova.DEFAULT_URL])[0]
@@ -752,6 +840,8 @@ def make_server(port: int = DEFAULT_PORT, runs_dir: Path | None = None,
         "host_name": os.environ.get("BRICKPIPE_HOST_NAME") or "",
     }
     handler.runner = Runner(runs_dir or here / "runs", handler.settings)
+    # In the runs folder so it lives in the /data volume of the Docker image.
+    handler.key_tokens = OwnKeyTokens(handler.runner.runs_dir / "own-keys.json")
     handler.page = resources.files("brickpipe").joinpath("web/index.html").read_bytes()
     return ThreadingHTTPServer((host, port), handler)
 

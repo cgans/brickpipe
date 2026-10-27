@@ -71,7 +71,8 @@ class FakeNova:
                               "default_id": "host"})
         if path == "/api/llm-models" and method == "POST":
             assert body["litellm_params"]["api_key"], "a key is required"
-            eid = f"e{len(self.llm_entries)}"
+            self.entry_seq = getattr(self, "entry_seq", 0) + 1  # never reuse an id after a delete
+            eid = f"e{self.entry_seq}"
             self.llm_entries[eid] = {"model_name": body.get("model_name"), "model": body["litellm_params"]["model"],
                                      "key": body["litellm_params"]["api_key"]}
             return self.json({"id": eid, "model_name": body.get("model_name"),
