@@ -5,8 +5,9 @@ members open `https://bricks.<your domain>` from anywhere, sign in with a
 one-time code sent to their email, and use the page exactly as on a laptop.
 Nothing is opened on the router and nothing is reachable without that login.
 
-This guide assumes a Proxmox host (any Debian/Ubuntu box with Docker works the
-same from step 2) and a domain already on Cloudflare.
+This guide covers the stack itself. Setting up the machine underneath it
+(a Debian VM on Proxmox, Docker, the firewall, the Cloudflare tunnel and
+the Access login) is in [server-setup.md](server-setup.md).
 
 ## What runs where
 
@@ -19,19 +20,20 @@ flowchart LR
     B -->|internal network| N
     B -.->|read only| D["ldraw-nova/data<br/>part database, shadow library"]
     N --> G["ldraw-nova-docker/data<br/>chats, generated models"]
+    N --> C["nova-config volume<br/>agents, keys"]
 ```
 
 - **brickpipe** runs *locked*: the server decides where Nova and the part
   libraries are; the page hides those settings. Browsers only choose what
   goes into a run. The server can hold one Rebrickable key for everyone.
-- **Nova** has no login of its own and holds your AI provider key, so it is
-  never published to the network; the tunnel is the only way in, and the
-  Access policy in front of the tunnel is the login.
+- **Nova** has no login of its own and uses your Anthropic API key, so it
+  is never published to the network; the tunnel is
+  the only way in, and the Access policy in front of the tunnel is the login.
 - Links from brickpipe into Nova (the chat, the 3D viewer) use the public
   hostname, so they work from outside.
 - Everyone shares one Nova: all chats and all runs are visible to all.
-- **Whose AI account pays.** Nova's default model entry (your key or your
-  Claude sign-in) is what runs unless a person brings their own: under
+- **Whose AI account pays.** Nova's default agent (your Anthropic API
+  key, step 5) is what runs unless a person brings their own: under
   Settings > AI account they can switch from "Use <host>'s AI account" to
   "Use my own key", pick a provider and model, and paste a key. brickpipe
   registers it in Nova as a model entry of its own; Nova keeps the key in
@@ -39,131 +41,187 @@ flowchart LR
   it. "Forget" removes the entry again. Set `BRICKPIPE_HOST_NAME=Chris` so
   the toggle names you.
 
+## Trust model
+
+Nova has no per-user accounts or permissions. Everyone on the Cloudflare
+Access allowlist reaches the same Nova and the same brickpipe, and can:
+
+- open Nova's Settings and edit or delete any agent, including the host's
+  default and other people's own-key agents. Editing an agent can redirect
+  its stored key elsewhere (for example by changing its `api_base`);
+- override `ANTHROPIC_API_KEY` (or any other variable) under Nova's
+  Settings > Environment variables;
+- use "Sign in with Claude" or "Sign in with ChatGPT" in Nova;
+- delete any agent, the host default included, through brickpipe's own
+  "Forget" endpoint, which does not check who registered the agent.
+
+Stored keys appear masked in Nova's API responses, but nobody has shown that
+they cannot be read some other way. So:
+
+- **The allowlist must only hold people you trust with every key on the
+  server**: yours and every family member's own key.
+- **"Don't sign in with Claude on this server" is a rule people follow,
+  not something the system enforces.** Anyone on the allowlist could do it.
+- Keep the host key in its own capped workspace (step 5) so the worst case
+  is bounded.
+
 ## 0. Before you start
 
-- Cap the AI provider key Nova will use (OpenAI, Anthropic and OpenRouter all
-  have a monthly spend limit). Nova spends it; a login in front is not a
-  budget.
+- Plan an Anthropic API key for the server that lives in its own
+  workspace with a monthly spend limit (step 5). Nova spends it; a login in
+  front is not a budget.
 - Pick two hostnames under your domain, e.g. `bricks.example.com` and
   `nova.example.com`.
-- The server needs about 4 GB RAM and 25 GB disk for this stack (Nova's
-  image is 5 GB, the LDraw library 150 MB, runs are small).
+- The stack needs about 4 GB RAM and 25 GB disk (Nova's image is 5 GB, the
+  LDraw library 150 MB, runs are small). Each container has a memory limit
+  you can change in `deploy/.env` (`NOVA_MEM_LIMIT`, default `3g`;
+  `BRICKPIPE_MEM_LIMIT`, `1g`; `TUNNEL_MEM_LIMIT`, `256m`).
 
-## 1. A VM for it (Proxmox)
+## 1–3. The server, Docker and Cloudflare
 
-In the Proxmox web UI, Create VM:
-
-| Setting | Value |
-|---|---|
-| Name | `brickpipe` |
-| ISO | Debian 12 netinst (upload under local > ISO Images) |
-| Machine / BIOS | defaults |
-| Disk | 40 GB |
-| CPU | 2 cores, type `host` |
-| Memory | 4096 MB |
-| Network | default bridge (vmbr0) |
-| Options > Start at boot | yes |
-
-Install Debian with defaults (one user, SSH server, no desktop). Give it a
-fixed address on your router (DHCP reservation) so it does not move.
-
-**Done when:** you can `ssh user@<vm-ip>` from your laptop.
-
-## 2. Docker and the code
-
-On the VM:
+Follow [server-setup.md](server-setup.md). It ends with Docker running, the
+tunnel token in hand, both hostnames routed (`brickpipe:8766` and
+`nova:8000`) and one Access application covering both, and the code checked
+out side by side:
 
 ```bash
-sudo apt update && sudo apt install -y git curl
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER && newgrp docker
-
 mkdir -p ~/lego && cd ~/lego
 git clone https://github.com/cgans/brickpipe.git
 git clone --branch v0.6.0 https://github.com/anteloc/ldraw-nova.git
-git clone --branch v0.6.0 https://github.com/anteloc/ldraw-nova-docker.git
+git clone --branch master https://github.com/cgans/ldraw-nova-docker.git
 ```
 
-**Done when:** `docker --version` prints a version and `ls ~/lego` shows the
-three folders side by side.
-
-## 3. The tunnel and the login (Cloudflare)
-
-In <https://one.dash.cloudflare.com> (Zero Trust; the free plan is enough):
-
-1. **Networks > Tunnels > Create a tunnel** (Cloudflared). Name it
-   `brickpipe`. On the connector page, copy the **token** (the long string
-   after `--token` in the install command); you do not need to run that
-   command. Save.
-2. In the tunnel's **Public Hostname** tab add two:
-   - `bricks.example.com` → type HTTP, URL `brickpipe:8766`
-   - `nova.example.com` → type HTTP, URL `nova:8000`
-   (The container names resolve inside the compose network.)
-3. **Access > Applications > Add an application > Self-hosted.** Name
-   `brickpipe`, application domain `bricks.example.com`. Add a second
-   domain in the same application for `nova.example.com`, so one login
-   covers both. Session duration: 1 week or longer. Identity provider: the
-   built-in **One-time PIN** is enough.
-4. In that application add a policy: name `family`, action **Allow**, rule
-   **Emails** = the family's email addresses (or **Emails ending in** your
-   family domain). Save.
-
-**Done when:** opening `https://bricks.example.com` in a private window asks
-for an email and sends a code (the page behind it will fail until step 4;
-that is fine). An email *not* on the list is refused.
+Nova's web app comes from the `cgans/ldraw-nova-docker` fork (it uses far
+fewer tokens per follow-up turn); the toolkit stays at upstream `v0.6.0`.
+`deploy/update.sh` clones whichever of the two is missing, and moves an
+older clone of upstream `ldraw-nova-docker` over to the fork.
 
 ## 4. Start it
 
 ```bash
 cd ~/lego/brickpipe
 cp deploy/.env.example deploy/.env
-nano deploy/.env     # hostnames, TUNNEL_TOKEN, optional REBRICKABLE_API_KEY
-docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+chmod 600 deploy/.env
+nano deploy/.env     # hostnames, TUNNEL_TOKEN, ANTHROPIC_API_KEY, BRICKPIPE_HOST_NAME
+deploy/update.sh
 ```
 
-The first build downloads about 5 GB for Nova and takes a while. Then:
+`update.sh` pulls the three repos, builds, starts everything and waits until
+Nova and brickpipe report healthy (the tunnel starts only after both are).
+The first build downloads about 5 GB for Nova and takes a while; brickpipe's
+first start then downloads the LDraw library (about 150 MB). To watch it:
 
 ```bash
-docker compose -f deploy/docker-compose.yml logs -f brickpipe
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env logs -f brickpipe
 ```
 
-should show the LDraw library downloading once (about 150 MB), then
+which ends with
 `brickpipe 0.x is at http://localhost:8766 (listening on 0.0.0.0) [locked: hosted mode]`.
 
 **Done when:**
-- `https://nova.example.com` opens Nova. Add your AI provider key in its
-  settings (or put it in `deploy/.env` and restart).
+- `docker compose -f deploy/docker-compose.yml --env-file deploy/.env ps`
+  shows `nova` and `brickpipe` as `healthy` and `tunnel` running.
+- `https://nova.example.com` opens Nova (after the Access login).
 - `https://bricks.example.com` opens brickpipe; the header says `v0.x`;
   Settings shows the "This brickpipe is hosted" note and no Nova or library
   fields; under Build the status line reads "Nova is up".
-- A test run from a prompt finishes with "Connectivity was checked" in its
-  report (proves the library and Nova's database are mounted).
 
-## 5. Day to day
+## 5. AI account
 
-- **Update brickpipe:** `cd ~/lego/brickpipe && git pull && docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build brickpipe`
+On this shared server Nova's **default** agent runs on **your Anthropic API
+key** (the host's key). Family members who would rather pay for their own
+runs switch to their own key in brickpipe; everyone else uses yours.
+
+1. In the [Anthropic Console](https://platform.claude.com/), create a
+   **workspace** for this server (e.g. `brickpipe`) and **set that
+   workspace's monthly spend limit**. Spend limits apply to an organization
+   or a workspace, not to a single key, so the separate workspace is what
+   caps the server. Then create the server's API key **inside that
+   workspace**. Nova spends it; the login in front is not a budget.
+2. Put it in `deploy/.env` as `ANTHROPIC_API_KEY=...` and run
+   `deploy/update.sh` (the container is recreated with the key).
+3. Nova does not pick the key up by itself; it needs an agent that reads it.
+   Once: open `https://nova.example.com` > **Settings**, under Anthropic
+   click **+ Add agent**, choose a model preset, set authentication to
+   **API key (env var)** with the variable `ANTHROPIC_API_KEY` (the form
+   defaults to Browser login for Anthropic; change it), click **Test**, save,
+   then **Make default**. The agent only stores the variable's name; the key
+   itself stays in `deploy/.env`.
+
+**Do not use "Sign in with Claude" on this server.** That would put your
+personal Claude account behind a page the whole family uses: their runs
+would count against your plan and your account. Leave Nova's Claude and
+ChatGPT sign-ins disconnected here.
+
+**Family members' own keys.** In brickpipe, **Settings > AI account**, they
+switch "Use Chris's AI account" (the name comes from `BRICKPIPE_HOST_NAME`)
+to "Use my own key", pick Anthropic and a model, and paste their key.
+brickpipe registers it in Nova as an agent of its own, and their runs are
+billed to them. "Forget" removes it.
+
+**Persistence.** Nova's agents, including those family keys, live in the
+`brickpipe_nova-config` volume (mounted at `/config`, readable only by Nova's
+server process, not by its agents). They survive restarts, rebuilds and
+`update.sh`. Only removing the volume (`docker compose down -v`,
+`docker volume rm`) loses them; `backup.sh` keeps a copy. To change your key,
+edit `deploy/.env` and run `update.sh`; the agent keeps working.
+
+**Done when:** Nova's Settings shows your Anthropic agent with the
+**Default** badge, and a test run from a prompt in brickpipe finishes with
+"Connectivity was checked" in its report (proves the key works and the
+library and Nova's database are mounted).
+
+## 6. Day to day
+
+- **Update everything:** `~/lego/brickpipe/deploy/update.sh`. It
+  fast-forwards brickpipe and the Nova fork, keeps the toolkit at `v0.6.0`,
+  rebuilds, restarts what changed, and removes old images and build cache
+  older than a week. Safe to re-run;
+  it stops without touching anything if a repo has local edits.
+- **Back up:** `~/lego/brickpipe/deploy/backup.sh` writes
+  `~/lego/backups/brickpipe-backup-<date>-<time>.tar.gz` with brickpipe's
+  runs, Nova's chats and models, and Nova's settings (agents and the
+  family's keys), and keeps the newest 7
+  (`BACKUP_DIR` and `BACKUP_KEEP` in `deploy/.env`). Restore steps are at the
+  top of the script. **The archive contains the API keys stored in Nova
+  (family members' keys included):** it is written readable only by you; keep every copy
+  private (never in a shared folder or a public bucket). A nightly cron
+  line: `15 3 * * * $HOME/lego/brickpipe/deploy/backup.sh >> $HOME/lego/backups/backup.log 2>&1`
 - **Add a family member:** add their email to the Access policy. Nothing to
-  restart.
-- **Where things are:** runs in the `brickpipe-data` volume
-  (`docker volume inspect brickpipe_brickpipe-data`), Nova's chats and
-  models under `~/lego/ldraw-nova-docker/data`.
-- **Logs:** `docker compose -f deploy/docker-compose.yml logs --tail 100 nova brickpipe tunnel`
-- **Stop everything:** `docker compose -f deploy/docker-compose.yml down`
+  restart. Only add people you trust with every key on the server (see
+  [Trust model](#trust-model)).
+- **Where things are:** runs in the `brickpipe_brickpipe-data` volume,
+  Nova's agents and keys in the `brickpipe_nova-config` volume, Nova's
+  chats and models under `~/lego/ldraw-nova-docker/data`.
+- **Logs:** `docker compose -f deploy/docker-compose.yml --env-file deploy/.env logs --tail 100 nova brickpipe tunnel`
+- **Stop everything:** `docker compose -f deploy/docker-compose.yml --env-file deploy/.env down`
+  (never add `-v`: that deletes the volumes, Nova's agents and keys included).
+- **Newer cloudflared:** change `CLOUDFLARED_VERSION` in `deploy/.env`, then
+  `update.sh`.
 
 ## If something goes wrong
 
 | Symptom | Cause | Fix |
 |---|---|---|
 | Access page appears but then `502` or "unreachable" | tunnel container not connected, or hostname URL wrong | `docker compose logs tunnel`; check the Public Hostname URLs are `brickpipe:8766` and `nova:8000` |
-| brickpipe opens but "Nova is not reachable" | Nova still building or crashed | `docker compose logs nova`; wait for the build; check the provider key |
+| `update.sh` stops at "waiting until they are healthy", or `ps` shows `unhealthy` | Nova or brickpipe did not start; the tunnel waits for both | `docker compose logs nova brickpipe`; on brickpipe's first start, the library download can take minutes |
+| A container keeps restarting, `docker inspect` shows `OOMKilled: true` | memory limit too low | raise `NOVA_MEM_LIMIT` (or the others) in `deploy/.env`, run `update.sh` |
+| brickpipe opens but "Nova is not reachable" | Nova still building or crashed | `docker compose logs nova`; wait for the build |
+| Runs fail with "Environment variable ANTHROPIC_API_KEY is not set" | key missing from `deploy/.env`, or container not recreated | fill it in, run `update.sh` |
+| Runs fail with an authentication or billing error | key revoked, or the workspace's spend limit reached | Anthropic Console: check the key and the `brickpipe` workspace's limit |
+| Runs fail with "no model" or use the wrong account | Nova has no default agent | Nova > Settings: **Make default** on the Anthropic env-var agent (step 5) |
+| Nova's agents and family keys are gone after an update | the `brickpipe_nova-config` volume was removed | restore it from a backup (`backup.sh` header), or redo step 5 |
 | 3D viewer or "Open the Nova chat" shows a login page or fails | `nova.example.com` is not in the same Access application | add it as a second domain of the brickpipe application |
 | Report says the connectivity check was skipped | library download failed or Nova data not mounted | `docker compose logs brickpipe`; check `~/lego/ldraw-nova/data/ldraw-info.db` exists |
+| `update.sh` says a repo has local changes | something edited a tracked file there | `git -C <folder> status`; stash or discard the change, re-run |
 | Someone outside the family can log in | policy too broad | tighten the Access policy to listed emails |
 
 ## Doing it without Proxmox or without Cloudflare
 
-Any Linux box with Docker works from step 2. If you would rather not use
-Cloudflare, Tailscale is the other sensible option: install it on the server
+Any Linux box with Docker and the three repos side by side works from
+step 4. If you would rather not use Cloudflare, Tailscale is the other sensible option: install it on the server
 and on each family device, share the server into their tailnet, drop the
 `tunnel` service and change the two `ports` lines to the server's Tailscale
 address. There is then no login page; the tailnet membership is the login.
+`update.sh` expects the tunnel, so run its `git` and `docker compose` steps
+by hand in that setup.
