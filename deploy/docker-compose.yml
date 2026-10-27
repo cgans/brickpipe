@@ -1,15 +1,19 @@
 # brickpipe + LDraw Nova + a Cloudflare tunnel, for a home server.
 #
-# Layout this file expects (three folders side by side):
-#   brickpipe/            this repo
+# Layout this file expects (three folders side by side, e.g. ~/lego):
+#   brickpipe/            git clone https://github.com/cgans/brickpipe.git
 #   ldraw-nova/           git clone --branch v0.6.0 https://github.com/anteloc/ldraw-nova.git
-#   ldraw-nova-docker/    git clone --branch v0.6.0 https://github.com/anteloc/ldraw-nova-docker.git
+#   ldraw-nova-docker/    git clone --branch master https://github.com/cgans/ldraw-nova-docker.git
+# (Nova's web app comes from the cgans fork; the toolkit stays at upstream v0.6.0.
+# deploy/update.sh keeps all three where they should be.)
 #
 # Run from the brickpipe folder:
 #   docker compose -f deploy/docker-compose.yml --env-file deploy/.env up -d --build
+# or simply deploy/update.sh.
 #
 # Nothing here publishes a port to the network: the only way in is the
 # tunnel, and Cloudflare Access in front of it decides who gets through.
+# The two 127.0.0.1 ports are for checks on the server itself.
 # See docs/hosting.md.
 
 name: brickpipe
@@ -22,17 +26,34 @@ services:
         nova: ../../ldraw-nova
     image: ldraw-nova-app
     container_name: ldraw-nova-app
+    platform: linux/amd64   # LeoCAD ships x86_64-only builds
     init: true
     restart: unless-stopped
+    mem_limit: ${NOVA_MEM_LIMIT:-3g}
     volumes:
+      # Chats, generated models and agents' work folders.
       - ../../ldraw-nova-docker/data:/data
+      # Model entries and keys (models.json, environment.json) and the
+      # Claude / ChatGPT sign-ins (browser/). Root-only inside the container
+      # and kept out of /data on purpose; this volume is what keeps you
+      # signed in across restarts and rebuilds.
       - nova-config:/config
     environment:
+      # Optional provider keys. Nova uses them for model entries that have no
+      # key of their own; keys pasted in Nova's Settings take precedence.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       TYPESAFE_API_KEY: ${TYPESAFE_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # Reachable on the server itself for a quick check; not from the LAN.
+    healthcheck:
+      # A real API route (reads /config), not just the static page.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/llm-models', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 2m
     ports:
       - "127.0.0.1:8765:8000"
 
@@ -42,9 +63,12 @@ services:
     image: brickpipe
     container_name: brickpipe
     restart: unless-stopped
+    mem_limit: ${BRICKPIPE_MEM_LIMIT:-512m}
     depends_on:
-      - nova
+      nova:
+        condition: service_healthy
     volumes:
+      # Runs, the LDraw library it downloads, the Rebrickable cache.
       - brickpipe-data:/data
       # Nova's part database and the shadow library, read only.
       - ../../ldraw-nova/data:/nova/data:ro
@@ -55,19 +79,33 @@ services:
       REBRICKABLE_API_KEY: ${REBRICKABLE_API_KEY:-}
       BRICKPIPE_HOST_NAME: ${BRICKPIPE_HOST_NAME:-}
       BRICKPIPE_FEATURES: ${BRICKPIPE_FEATURES:-}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # The first start downloads the LDraw library (~150 MB) before listening.
+      start_period: 15m
     ports:
       - "127.0.0.1:8766:8766"
 
   tunnel:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:${CLOUDFLARED_VERSION:-2026.9.3}
     container_name: brickpipe-tunnel
     restart: unless-stopped
+    mem_limit: ${TUNNEL_MEM_LIMIT:-128m}
     command: tunnel --no-autoupdate run
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in deploy/.env}
     depends_on:
-      - brickpipe
+      brickpipe:
+        condition: service_healthy
+      nova:
+        condition: service_healthy
 
 volumes:
+  # Fixed names, so deploy/backup.sh finds them whatever the project is called.
   nova-config:
+    name: brickpipe_nova-config
   brickpipe-data:
+    name: brickpipe_brickpipe-data
