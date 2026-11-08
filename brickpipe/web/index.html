@@ -59,11 +59,16 @@ header {
 header p { max-width: 60ch; }
 .tabs { display: flex; gap: 6px; flex-wrap: wrap; align-self: center; }
 .tabs .btn.on { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+.menu-btn { display: none; }
 @media (max-width: 700px) {
-  header { flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 12px 8px; }
+  header { position: relative; align-items: flex-start; gap: 10px; padding: 14px 12px 8px; }
+  header > div { flex: 1; min-width: 0; }
   header p { font-size: .9rem; }
-  .tabs { align-self: stretch; flex-wrap: nowrap; }
-  .tabs .btn { flex: 1 1 0; min-width: 0; padding-left: 6px; padding-right: 6px; text-align: center; justify-content: center; }
+  .menu-btn { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 44px; height: 44px; padding: 0; cursor: pointer; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); }
+  .menu-btn svg { width: 22px; height: 22px; stroke: currentColor; stroke-width: 2; stroke-linecap: round; fill: none; }
+  .tabs { display: none; position: absolute; z-index: 20; top: 58px; left: 12px; right: 12px; flex-direction: column; flex-wrap: nowrap; gap: 4px; padding: 8px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 8px 24px rgba(0,0,0,.25); }
+  .tabs.open { display: flex; }
+  .tabs .btn { width: 100%; min-height: 44px; text-align: left; }
   main, #settingsView, #historyView { padding-left: 12px; padding-right: 12px; }
 }
 #settingsView, #historyView { max-width: 1180px; margin: 0 auto; padding: 0 16px 40px; }
@@ -221,7 +226,8 @@ table.runs .btn { padding: 6px 10px; }
     <h1>brickpipe <span class="small muted" id="version" style="font-weight:400"></span></h1>
     <p class="muted">Describe a model. Nova designs it, brickpipe checks that every piece can be bought, and the two go back and forth until it can. You get the shopping list and the instructions.</p>
   </div>
-  <nav class="tabs" aria-label="Views">
+  <button class="menu-btn" id="menuBtn" type="button" aria-label="Menu" aria-expanded="false" aria-controls="mainNav"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
+  <nav class="tabs" id="mainNav" aria-label="Views">
     <button class="btn quiet on" id="tabBuild" type="button" aria-pressed="true">Build</button>
     <button class="btn quiet" id="tabHistory" type="button" aria-pressed="false">History</button>
     <button class="btn quiet" id="tabSettings" type="button" aria-pressed="false">Settings</button>
@@ -557,6 +563,13 @@ table.runs .btn { padding: 6px 10px; }
   $('tabBuild').onclick = () => showView('build');
   $('tabHistory').onclick = () => showView('history');
   $('tabSettings').onclick = () => showView('settings');
+
+  // mobile menu: the same nav, revealed as a dropdown at <=700px
+  function setMenu(open) { $('mainNav').classList.toggle('open', open); $('menuBtn').setAttribute('aria-expanded', String(open)); }
+  $('menuBtn').onclick = () => setMenu(!$('mainNav').classList.contains('open'));
+  $('mainNav').addEventListener('click', e => { if (e.target.closest('button')) setMenu(false); });
+  document.addEventListener('click', e => { if (!e.target.closest('#mainNav, #menuBtn')) setMenu(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') setMenu(false); });
 
   // what the current settings leave out, shown under the run button
   function settingsHint() {
