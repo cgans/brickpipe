@@ -238,6 +238,7 @@ table.runs .btn { padding: 6px 10px; }
 .err { color: var(--bad); }
 /* first-visit setup dialog: native <dialog>, so focus is trapped and Escape closes it */
 #setupDlg { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink); }
+#suAiProv button { font-size: .85rem; }
 #setupDlg::backdrop { background: rgba(0,0,0,.55); }
 .sucard { padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
 .sucard h3 { font-size: 1.02rem; }
@@ -481,7 +482,8 @@ table.runs .btn { padding: 6px 10px; }
           </div>
           <div>
             <label for="aiKey">API key</label>
-            <input id="aiKey" type="password" autocomplete="off" placeholder="sk-…">
+            <input id="aiKey" type="password" autocomplete="off" placeholder="sk-ant-…">
+            <p class="small" id="aiProvNote"></p>
             <p class="small muted">Sent once to Nova, which keeps it in its own settings on the server for your runs. It is not kept in this browser.</p>
           </div>
           <div class="row">
@@ -563,17 +565,18 @@ table.runs .btn { padding: 6px 10px; }
 
     <div class="sucard stack">
       <h3>AI account</h3>
-      <p class="small">Runs the design agent that builds your models.</p>
+      <p class="small">Runs the design agent that builds your models. Works with Claude, OpenAI or OpenRouter.</p>
       <p class="small st" id="suAiSt" aria-live="polite"></p>
       <form id="suAiForm" class="stack">
+        <div role="group" aria-label="AI provider" class="seg" id="suAiProv"></div>
         <div>
-          <label for="suAiKey" id="suAiLbl">Anthropic API key</label>
+          <label for="suAiKey" id="suAiLbl">API key</label>
           <input id="suAiKey" type="password" autocomplete="off" placeholder="sk-ant-…">
         </div>
         <div class="row"><button class="btn quiet small" type="submit">Save to Nova</button></div>
         <span class="err small" id="suAiErr"></span>
       </form>
-      <p class="small muted"><a href="https://platform.claude.com/" target="_blank" rel="noopener">Sign up at platform.claude.com</a>: create an account, then API keys.</p>
+      <p class="small muted" id="suAiNote"></p>
     </div>
 
     <div class="sucard stack">
@@ -705,7 +708,7 @@ table.runs .btn { padding: 6px 10px; }
     settingsHint();
   }
   let flags = {}, hosted = false, serverKey, hostName = '';
-  let aiDefault; // Nova has a default AI account: undefined = not asked yet, null = could not tell
+  let aiDefault, aiDefaultProv = ''; // Nova has a default AI account: undefined = not asked yet, null = could not tell
   let catalog = [];
   function aiRender() {
     const own = $('aiOwn').checked;
@@ -715,10 +718,38 @@ table.runs .btn { padding: 6px 10px; }
     $('aiSavedName').textContent = store.get('llm_model_name', '');
     setupRender();
   }
+  // Providers come from Nova's model catalog (model ids are "provider/model"); the three Nova's own
+  // settings offer are the fallback. Names, key prefixes and sign-up links are known for those three only.
+  const AI_META = {
+    anthropic: { short: 'Claude', name: 'Claude (Anthropic)', ph: 'sk-ant-…', url: 'https://platform.claude.com/', site: 'platform.claude.com' },
+    openai: { short: 'OpenAI', name: 'OpenAI', ph: 'sk-…', url: 'https://platform.openai.com/', site: 'platform.openai.com' },
+    openrouter: { short: 'OpenRouter', name: 'OpenRouter', ph: 'sk-or-…', url: 'https://openrouter.ai/', site: 'openrouter.ai' },
+  };
+  const aiMeta = p => AI_META[p] || { short: p, name: p, ph: 'API key' };
+  function aiProviders() {
+    const seen = [...new Set(catalog.map(m => m.model.split('/')[0]).filter(Boolean))];
+    if (!seen.length) return Object.keys(AI_META);
+    return [...Object.keys(AI_META).filter(k => seen.includes(k)), ...seen.filter(k => !AI_META[k])];
+  }
+  function aiProvNote(p) {
+    const m = aiMeta(p);
+    return `Your key, your bill: designs run on your own ${esc(m.name)} account, not the host's.` +
+      (m.url ? ` <a href="${m.url}" target="_blank" rel="noopener">Sign up at ${m.site}</a>: create an account, then API keys.` : '');
+  }
+  function aiPickProvider(p) { $('aiProvider').value = p; aiModels(); }
   function aiModels() {
-    const p = $('aiProvider').value;
+    const list = aiProviders(), cur = $('aiProvider').value;
+    const p = list.includes(cur) ? cur : list[0];
+    $('aiProvider').innerHTML = list.map(k => `<option value="${esc(k)}">${esc(aiMeta(k).name)}</option>`).join('');
+    $('aiProvider').value = p;
+    $('suAiProv').style.gridTemplateColumns = 'repeat(auto-fit, minmax(88px, 1fr))';
+    $('suAiProv').innerHTML = list.map(k => `<button type="button" data-p="${esc(k)}" aria-pressed="${k === p}">${esc(aiMeta(k).short)}</button>`).join('');
     const mine = catalog.filter(m => m.model.startsWith(p + '/'));
     $('aiModel').innerHTML = mine.map(m => `<option value="${esc(m.model)}">${esc(m.name)}</option>`).join('') || '<option value="">(no models listed)</option>';
+    const m = aiMeta(p);
+    $('aiKey').placeholder = $('suAiKey').placeholder = m.ph;
+    $('aiProvNote').innerHTML = $('suAiNote').innerHTML = aiProvNote(p);
+    setupRender();
   }
   async function loadAiAccounts() {
     const q = '?nova_url=' + encodeURIComponent($('novaUrl').value.trim());
@@ -726,7 +757,7 @@ table.runs .btn { padding: 6px 10px; }
       const [acc, cat] = await Promise.all([api('/api/nova/llm-models' + q), api('/api/nova/model-catalog' + q)]);
       catalog = cat.models || [];
       const def = (acc.models || []).find(m => m.id === acc.default_id);
-      aiDefault = !!def;
+      aiDefault = !!def; aiDefaultProv = def ? String(def.model || '').split('/')[0] : '';
       $('aiHostNote').textContent = def ? `Currently ${def.name}${def.auth_mode === 'browser' ? ' (signed in)' : ''}.` : 'Nova has no default model yet; add one in Nova or bring your own key.';
       const saved = store.get('llm_model_id', '');
       // Not listed can mean gone or just unusable now; keep it so Forget (which knows) can remove it.
@@ -735,6 +766,7 @@ table.runs .btn { padding: 6px 10px; }
     aiModels(); aiRender();
   }
   $('aiProvider').addEventListener('change', aiModels);
+  $('suAiProv').addEventListener('click', e => { const b = e.target.closest('button[data-p]'); if (b) { aiPickProvider(b.dataset.p); $('suAiProv').querySelector('[aria-pressed="true"]').focus(); } });
   for (const id of ['aiHost', 'aiOwn']) $(id).addEventListener('change', () => { store.set('ai_mode', $('aiOwn').checked ? 'own' : 'host'); aiRender(); });
   $('aiSave').onclick = async () => {
     $('aiError').textContent = '';
@@ -1291,13 +1323,14 @@ table.runs .btn { padding: 6px 10px; }
     const st = (id, text, ok) => { $(id).textContent = text; $(id).classList.toggle('ok', !!ok); };
     const mine = store.get('llm_model_id', ''), hasToken = !!store.get('rebrickable_user_token', '');
     const keyHere = !!$('rebrickableKey').value.trim(), hasRb = !!serverKey || keyHere;
-    if (mine) st('suAiSt', 'Using your own key', true);
-    else if (aiDefault === true) st('suAiSt', hosted ? 'Covered: this server has a shared key' : "Covered: Nova's default account is set up", true);
+    const prov = aiMeta($('aiProvider').value).short, dp = aiDefaultProv ? ' ' + aiMeta(aiDefaultProv).short : '';
+    if (mine) st('suAiSt', 'Using your own key: ' + store.get('llm_model_name', ''), true);
+    else if (aiDefault === true) st('suAiSt', `Covered: ${hosted ? "this server's shared" : "Nova's default"}${dp} account runs the designer`, true);
     else if (aiDefault === false) st('suAiSt', "Needed: Nova has no default account yet");
     else if (aiDefault === null) st('suAiSt', "Can't tell from here: Nova isn't answering");
     else st('suAiSt', 'Checking…');
     $('suAiForm').hidden = !!mine;
-    $('suAiLbl').textContent = aiDefault === true ? 'Add your own to run on your own account (optional)' : 'Anthropic API key';
+    $('suAiLbl').textContent = aiDefault === true ? `Add your own ${prov} key to run on your own account (optional)` : `${prov} API key`;
     if (serverKey) st('suRbSt', 'Covered by this server', true);
     else if (keyHere) st('suRbSt', 'Saved in this browser', true);
     else if (serverKey === undefined) st('suRbSt', "Can't tell from here: the server didn't answer");
@@ -1313,7 +1346,7 @@ table.runs .btn { padding: 6px 10px; }
   onSubmit('suAiForm', async () => {
     $('suAiErr').textContent = '';
     if (!$('suAiKey').value.trim()) { $('suAiErr').textContent = 'Paste a key first.'; return; }
-    $('aiProvider').value = 'anthropic'; aiModels(); $('aiKey').value = $('suAiKey').value;
+    $('aiKey').value = $('suAiKey').value;
     await $('aiSave').onclick();
     if (store.get('llm_model_id', '')) { $('suAiKey').value = ''; $('aiOwn').checked = true; $('aiOwn').dispatchEvent(new Event('change')); }
     else $('suAiErr').textContent = $('aiError').textContent;
@@ -1334,6 +1367,7 @@ table.runs .btn { padding: 6px 10px; }
   $('openSetup').onclick = openSetup;
   const maybeOpenSetup = () => { if (!store.get('bp_setup_done', '') && !window.name.includes('bp_setup_done')) openSetup(); };
 
+  aiModels();
   loadSettings().then(() => { loadNova(); loadHistory(); }).finally(maybeOpenSetup);
   if (location.hash === '#settings') showView('settings');
   if (location.hash === '#history') showView('history');
