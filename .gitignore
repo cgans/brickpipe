@@ -6,3 +6,6 @@ out/
 deploy/.env
 build/
 dist/
+
+# owner-supplied easter egg clip, never committed
+**/easter/*.mp3

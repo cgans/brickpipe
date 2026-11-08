@@ -664,6 +664,17 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(self.page)
             return
+        if path == "/easter/nedry.mp3":  # the owner's own clip, if he dropped one in web/easter/ (never committed)
+            clip = resources.files("brickpipe").joinpath("web/easter/nedry.mp3")
+            if not clip.is_file():
+                return self.send_json({"error": "not found"}, 404)
+            data = clip.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "audio/mpeg")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if path == "/api/settings":
             found = connectivity.find_ldraw_library()
             shown = {k: v for k, v in self.settings.items() if k != "rebrickable_key"}

@@ -239,6 +239,12 @@ table.runs .btn { padding: 6px 10px; }
 /* first-visit setup dialog: native <dialog>, so focus is trapped and Escape closes it */
 #setupDlg { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink); }
 #suAiProv button { font-size: .85rem; }
+.sucard.shared { border-color: var(--focus); }
+.eggtoast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); display: flex; align-items: center; gap: 10px; background: var(--ink); color: var(--panel); padding: 10px 18px; border-radius: 8px; font-weight: 700; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 10; }
+.eggtoast.show { opacity: 1; }
+.eggtoast .finger { display: inline-block; font-size: 1.6rem; line-height: 1; transform-origin: 50% 90%; animation: wag .35s ease-in-out infinite alternate; }
+@keyframes wag { from { transform: rotate(-22deg); } to { transform: rotate(22deg); } }
+@media (prefers-reduced-motion: reduce) { .eggtoast .finger { animation: none; } .eggtoast { transition: none; } }
 #setupDlg::backdrop { background: rgba(0,0,0,.55); }
 .sucard { padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
 .sucard h3 { font-size: 1.02rem; }
@@ -563,6 +569,11 @@ table.runs .btn { padding: 6px 10px; }
       <p class="small muted">brickpipe works with a few accounts. Here is each one, whether it is already covered, and where to sign up. Everything is optional except what a status says is needed.</p>
     </div>
 
+    <div class="sucard shared stack">
+      <button class="btn primary" type="button" id="suDefaults">Use the shared keys</button>
+      <p class="small muted" id="suDefaultsNote">Runs on the host's accounts, so you don't need any keys of your own. You can add your own later in Settings.</p>
+    </div>
+
     <div class="sucard stack">
       <h3>AI account</h3>
       <p class="small">Runs the design agent that builds your models. Works with Claude, OpenAI or OpenRouter.</p>
@@ -615,6 +626,7 @@ table.runs .btn { padding: 6px 10px; }
   </div>
 </dialog>
 <div class="toast" id="toast" role="status"></div>
+<div class="eggtoast" id="eggToast" role="status"><span class="finger" aria-hidden="true">&#9757;&#65039;</span><span>Ah, ah, ah!</span></div>
 
 <script>
 (() => {
@@ -1329,6 +1341,8 @@ table.runs .btn { padding: 6px 10px; }
     else if (aiDefault === false) st('suAiSt', "Needed: Nova has no default account yet");
     else if (aiDefault === null) st('suAiSt', "Can't tell from here: Nova isn't answering");
     else st('suAiSt', 'Checking…');
+    $('suDefaults').textContent = hostName ? `Use ${hostName}'s shared keys` : 'Use the shared keys';
+    $('suDefaultsNote').textContent = (hostName ? `Runs on ${hostName}'s accounts` : "Runs on the host's accounts") + ", so you don't need any keys of your own. You can add your own later in Settings.";
     $('suAiForm').hidden = !!mine;
     $('suAiLbl').textContent = aiDefault === true ? `Add your own ${prov} key to run on your own account (optional)` : `${prov} API key`;
     if (serverKey) st('suRbSt', 'Covered by this server', true);
@@ -1362,6 +1376,50 @@ table.runs .btn { padding: 6px 10px; }
     $('suLoginErr').textContent = $('rbError').textContent;
   });
   $('suDone').onclick = $('suSkip').onclick = () => dlg.close();
+
+  // "Use the shared keys": the host's accounts are the defaults. If the visitor brought none of their
+  // own (no AI key, no Rebrickable key, no collection sign-in saved), the Nedry "ah ah ah" moment plays.
+  // Tests read window.bp_egg_fired ({src, audio}) and the toast's data-audio attribute.
+  const EGG_SRC = 'easter/nedry.mp3';
+  const hasOwnKeys = () => !!(store.get('llm_model_id', '') || store.get('rebrickable_key', '').trim() || store.get('rebrickable_user_token', ''));
+  function eggFallbackSound(ctx) {
+    // original three staccato falling blips (finger-wag cadence), well under 1.5 s and quiet
+    try {
+      ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === 'suspended') ctx.resume();
+      [660, 523, 415].forEach((hz, i) => {
+        const t = ctx.currentTime + i * 0.26, osc = ctx.createOscillator(), g = ctx.createGain();
+        osc.type = 'square'; osc.frequency.setValueAtTime(hz, t); osc.frequency.exponentialRampToValueAtTime(hz * 0.8, t + 0.14);
+        g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.06, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.16);
+        osc.connect(g).connect(ctx.destination); osc.start(t); osc.stop(t + 0.18);
+      });
+      return 'synth';
+    } catch { return 'silent'; }
+  }
+  function playEgg() {
+    const mark = audio => { window.bp_egg_fired.audio = audio; $('eggToast').dataset.audio = audio; };
+    window.bp_egg_fired = { src: EGG_SRC, audio: 'pending' };
+    $('eggToast').dataset.audio = 'pending';
+    $('eggToast').classList.add('show');
+    clearTimeout(playEgg.t); playEgg.t = setTimeout(() => $('eggToast').classList.remove('show'), 3000);
+    let ctx = null;
+    try { ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch {}  // made inside the click, so it is allowed to sound
+    let settled = false;
+    const fallback = () => { if (!settled) { settled = true; mark(eggFallbackSound(ctx)); } };
+    try {
+      const a = new Audio(EGG_SRC);
+      a.addEventListener('error', fallback);
+      a.addEventListener('playing', () => { if (!settled) { settled = true; mark('file'); } });
+      const p = a.play();
+      if (p && p.catch) p.catch(fallback);
+    } catch { fallback(); }
+  }
+  $('suDefaults').onclick = () => {
+    const egg = !hasOwnKeys();
+    store.set('bp_key_choice', 'defaults');
+    dlg.close();
+    if (egg) playEgg();
+  };
   // Escape, Done and Skip all end in close; storage that throws falls back to window.name (survives reloads in this tab)
   dlg.addEventListener('close', () => { store.set('bp_setup_done', '1'); if (!store.get('bp_setup_done', '')) window.name += ' bp_setup_done'; });
   $('openSetup').onclick = openSetup;
