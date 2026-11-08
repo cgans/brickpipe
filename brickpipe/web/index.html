@@ -236,6 +236,14 @@ table.runs .btn { padding: 6px 10px; }
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: var(--panel); padding: 10px 16px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; }
 .toast.show { opacity: 1; }
 .err { color: var(--bad); }
+/* first-visit setup dialog: native <dialog>, so focus is trapped and Escape closes it */
+#setupDlg { width: min(640px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow: auto; padding: 18px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel); color: var(--ink); }
+#setupDlg::backdrop { background: rgba(0,0,0,.55); }
+.sucard { padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
+.sucard h3 { font-size: 1.02rem; }
+.sucard .st { font-weight: 700; }
+.sucard .st.ok { color: var(--good); }
+.sucard input { background: var(--panel); }
 </style>
 </head>
 <body>
@@ -413,6 +421,7 @@ table.runs .btn { padding: 6px 10px; }
 </section>
 
 <section id="settingsView" hidden>
+  <p class="hint muted" style="margin-bottom:12px">Every key and sign-in brickpipe can use, with where to get each: <button type="button" id="openSetup">Open setup</button></p>
   <div class="settings-grid">
     <div class="panel stack">
       <h2>Nova</h2>
@@ -545,6 +554,63 @@ table.runs .btn { padding: 6px 10px; }
     </div>
   </div>
 </section>
+<dialog id="setupDlg" aria-labelledby="suTitle">
+  <div class="stack">
+    <div>
+      <h2 id="suTitle">Get set up</h2>
+      <p class="small muted">brickpipe works with a few accounts. Here is each one, whether it is already covered, and where to sign up. Everything is optional except what a status says is needed.</p>
+    </div>
+
+    <div class="sucard stack">
+      <h3>AI account</h3>
+      <p class="small">Runs the design agent that builds your models.</p>
+      <p class="small st" id="suAiSt" aria-live="polite"></p>
+      <form id="suAiForm" class="stack">
+        <div>
+          <label for="suAiKey" id="suAiLbl">Anthropic API key</label>
+          <input id="suAiKey" type="password" autocomplete="off" placeholder="sk-ant-…">
+        </div>
+        <div class="row"><button class="btn quiet small" type="submit">Save to Nova</button></div>
+        <span class="err small" id="suAiErr"></span>
+      </form>
+      <p class="small muted"><a href="https://platform.claude.com/" target="_blank" rel="noopener">Sign up at platform.claude.com</a>: create an account, then API keys.</p>
+    </div>
+
+    <div class="sucard stack">
+      <h3>Rebrickable API key</h3>
+      <p class="small">Checks parts and colours against real sets.</p>
+      <p class="small st" id="suRbSt" aria-live="polite"></p>
+      <form id="suRbForm" class="stack">
+        <div>
+          <label for="suRbKey">Rebrickable API key</label>
+          <input id="suRbKey" type="password" autocomplete="off">
+        </div>
+        <div class="row"><button class="btn quiet small" type="submit">Save key</button></div>
+      </form>
+      <p class="small muted"><a href="https://rebrickable.com/register/" target="_blank" rel="noopener">Sign up at rebrickable.com</a>. The key is at <a href="https://rebrickable.com/users/~/settings/#api" target="_blank" rel="noopener">Account &gt; Settings &gt; API</a>.</p>
+    </div>
+
+    <div class="sucard stack">
+      <h3>Rebrickable collection sign-in</h3>
+      <p class="small">Subtracts the bricks you already own from the shopping list. Optional; only the token Rebrickable returns is kept, in this browser.</p>
+      <p class="small st" id="suLoginSt" aria-live="polite"></p>
+      <form id="suLoginForm" class="stack">
+        <div class="row">
+          <input id="suUser" type="text" class="grow" placeholder="Username or email" aria-label="Rebrickable username or email" autocomplete="username">
+          <input id="suPass" type="password" class="grow" placeholder="Password" aria-label="Rebrickable password" autocomplete="current-password">
+          <button class="btn quiet small" type="submit" id="suLoginBtn">Sign in</button>
+        </div>
+        <span class="err small" id="suLoginErr"></span>
+      </form>
+      <p class="small muted">Uses the same Rebrickable account: <a href="https://rebrickable.com/register/" target="_blank" rel="noopener">sign up at rebrickable.com</a>.</p>
+    </div>
+
+    <div class="row" style="justify-content:flex-end">
+      <button class="btn quiet" type="button" id="suSkip">Skip for now</button>
+      <button class="btn primary" type="button" id="suDone">Done</button>
+    </div>
+  </div>
+</dialog>
 <div class="toast" id="toast" role="status"></div>
 
 <script>
@@ -599,12 +665,15 @@ table.runs .btn { padding: 6px 10px; }
   // what the current settings leave out, shown under the run button
   function settingsHint() {
     const missing = [];
-    if (!$('rebrickableKey').value.trim() && !serverKey) missing.push('no Rebrickable key, so colours are not checked against real parts');
+    const noRb = !$('rebrickableKey').value.trim() && !serverKey;
+    if (noRb) missing.push('no Rebrickable key, so colours are not checked against real parts');
     if (!$('ldrawDir').value.trim() && !hosted) missing.push('no LDraw library, so stud connections are not checked');
     if (flags.prices && !blComplete()) missing.push(Object.values(blCreds()).some(Boolean) ? 'BrickLink needs all four values, so no price estimate' : 'no BrickLink keys, so no price estimate');
     $('settingsHint').hidden = !missing.length;
-    $('settingsHint').innerHTML = missing.length ? esc(missing.join('; ')) + '. <button type="button" id="hintSettings">Open Settings</button>' : '';
+    $('settingsHint').innerHTML = missing.length ? esc(missing.join('; ')) + '. <button type="button" id="hintSettings">Open Settings</button>' + (noRb ? ' or <button type="button" id="hintSetup">Get set up</button>' : '') : '';
     const b = $('hintSettings'); if (b) b.onclick = () => showView('settings');
+    const g = $('hintSetup'); if (g) g.onclick = openSetup;
+    setupRender();
   }
 
   // settings
@@ -635,7 +704,8 @@ table.runs .btn { padding: 6px 10px; }
     rbRender();
     settingsHint();
   }
-  let flags = {}, hosted = false, serverKey = false, hostName = '';
+  let flags = {}, hosted = false, serverKey, hostName = '';
+  let aiDefault; // Nova has a default AI account: undefined = not asked yet, null = could not tell
   let catalog = [];
   function aiRender() {
     const own = $('aiOwn').checked;
@@ -643,6 +713,7 @@ table.runs .btn { padding: 6px 10px; }
     const id = store.get('llm_model_id', '');
     $('aiSaved').hidden = !id; $('aiForm').hidden = !!id;
     $('aiSavedName').textContent = store.get('llm_model_name', '');
+    setupRender();
   }
   function aiModels() {
     const p = $('aiProvider').value;
@@ -655,11 +726,12 @@ table.runs .btn { padding: 6px 10px; }
       const [acc, cat] = await Promise.all([api('/api/nova/llm-models' + q), api('/api/nova/model-catalog' + q)]);
       catalog = cat.models || [];
       const def = (acc.models || []).find(m => m.id === acc.default_id);
+      aiDefault = !!def;
       $('aiHostNote').textContent = def ? `Currently ${def.name}${def.auth_mode === 'browser' ? ' (signed in)' : ''}.` : 'Nova has no default model yet; add one in Nova or bring your own key.';
       const saved = store.get('llm_model_id', '');
       // Not listed can mean gone or just unusable now; keep it so Forget (which knows) can remove it.
       if (saved && !(acc.models || []).some(m => m.id === saved)) { $('aiHost').checked = true; $('aiError').textContent = 'Your saved key isn\'t available right now. Forget removes it.'; }
-    } catch (e) { $('aiHostNote').textContent = ''; }
+    } catch (e) { $('aiHostNote').textContent = ''; aiDefault = null; }
     aiModels(); aiRender();
   }
   $('aiProvider').addEventListener('change', aiModels);
@@ -700,6 +772,7 @@ table.runs .btn { padding: 6px 10px; }
   function rbRender() {
     const has = !!store.get('rebrickable_user_token', '');
     $('rbLoggedOut').hidden = has; $('rbLoggedIn').hidden = !has;
+    setupRender();
   }
   $('rbLogin').onclick = async () => {
     $('rbError').textContent = '';
@@ -1211,7 +1284,57 @@ table.runs .btn { padding: 6px 10px; }
 
   const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-  loadSettings().then(() => { loadNova(); loadHistory(); });
+  // first-visit setup: each card shows live status from what the page already knows and saves
+  // through the Settings / Build controls' own handlers (their values are filled in, then they run).
+  const dlg = $('setupDlg');
+  function setupRender() {
+    const st = (id, text, ok) => { $(id).textContent = text; $(id).classList.toggle('ok', !!ok); };
+    const mine = store.get('llm_model_id', ''), hasToken = !!store.get('rebrickable_user_token', '');
+    const keyHere = !!$('rebrickableKey').value.trim(), hasRb = !!serverKey || keyHere;
+    if (mine) st('suAiSt', 'Using your own key', true);
+    else if (aiDefault === true) st('suAiSt', hosted ? 'Covered: this server has a shared key' : "Covered: Nova's default account is set up", true);
+    else if (aiDefault === false) st('suAiSt', "Needed: Nova has no default account yet");
+    else if (aiDefault === null) st('suAiSt', "Can't tell from here: Nova isn't answering");
+    else st('suAiSt', 'Checking…');
+    $('suAiForm').hidden = !!mine;
+    $('suAiLbl').textContent = aiDefault === true ? 'Add your own to run on your own account (optional)' : 'Anthropic API key';
+    if (serverKey) st('suRbSt', 'Covered by this server', true);
+    else if (keyHere) st('suRbSt', 'Saved in this browser', true);
+    else if (serverKey === undefined) st('suRbSt', "Can't tell from here: the server didn't answer");
+    else st('suRbSt', 'Needed for colour checks');
+    $('suRbForm').hidden = hasRb;
+    if (hasToken) st('suLoginSt', 'Signed in', true);
+    else st('suLoginSt', hasRb ? 'Optional: not signed in' : 'Optional. Needs the Rebrickable API key above first');
+    $('suLoginForm').hidden = hasToken;
+    for (const id of ['suUser', 'suPass', 'suLoginBtn']) $(id).disabled = !hasRb;
+  }
+  function openSetup() { setupRender(); if (!dlg.open) dlg.showModal(); }
+  const onSubmit = (id, fn) => $(id).addEventListener('submit', e => { e.preventDefault(); fn(); });
+  onSubmit('suAiForm', async () => {
+    $('suAiErr').textContent = '';
+    if (!$('suAiKey').value.trim()) { $('suAiErr').textContent = 'Paste a key first.'; return; }
+    $('aiProvider').value = 'anthropic'; aiModels(); $('aiKey').value = $('suAiKey').value;
+    await $('aiSave').onclick();
+    if (store.get('llm_model_id', '')) { $('suAiKey').value = ''; $('aiOwn').checked = true; $('aiOwn').dispatchEvent(new Event('change')); }
+    else $('suAiErr').textContent = $('aiError').textContent;
+  });
+  onSubmit('suRbForm', () => {
+    if (!$('suRbKey').value.trim()) return;
+    $('rebrickableKey').value = $('suRbKey').value; $('rebrickableKey').dispatchEvent(new Event('change')); $('suRbKey').value = '';
+  });
+  onSubmit('suLoginForm', async () => {
+    $('suLoginErr').textContent = '';
+    $('rbUser').value = $('suUser').value; $('rbPass').value = $('suPass').value;
+    await $('rbLogin').onclick(); $('suPass').value = '';
+    $('suLoginErr').textContent = $('rbError').textContent;
+  });
+  $('suDone').onclick = $('suSkip').onclick = () => dlg.close();
+  // Escape, Done and Skip all end in close; storage that throws falls back to window.name (survives reloads in this tab)
+  dlg.addEventListener('close', () => { store.set('bp_setup_done', '1'); if (!store.get('bp_setup_done', '')) window.name += ' bp_setup_done'; });
+  $('openSetup').onclick = openSetup;
+  const maybeOpenSetup = () => { if (!store.get('bp_setup_done', '') && !window.name.includes('bp_setup_done')) openSetup(); };
+
+  loadSettings().then(() => { loadNova(); loadHistory(); }).finally(maybeOpenSetup);
   if (location.hash === '#settings') showView('settings');
   if (location.hash === '#history') showView('history');
   window.addEventListener('hashchange', () => showView(['#settings', '#history'].includes(location.hash) ? location.hash.slice(1) : 'build'));
