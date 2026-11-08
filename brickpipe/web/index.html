@@ -97,6 +97,24 @@ textarea, input[type=text], input[type=password], input[type=number], select {
 }
 textarea { min-height: 120px; resize: vertical; }
 details > summary { cursor: pointer; font-weight: 700; margin-bottom: 10px; }
+/* build form: start-from control and the bricks status card */
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); }
+.seg button { min-height: 44px; white-space: nowrap; font-size: .95rem; padding: 0 6px; border: 1px solid transparent; border-radius: 8px; background: transparent; cursor: pointer; font-weight: 700; color: var(--ink-2); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+.statuscard { border: 1px solid var(--line); border-radius: var(--radius); background: var(--panel-2); }
+.statuscard > button { all: unset; box-sizing: border-box; width: 100%; min-height: 64px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.statuscard > button:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: var(--radius); }
+.statuscard .bglyph { flex: none; width: 46px; height: 32px; fill: none; stroke: var(--ink); stroke-width: 3; stroke-linejoin: round; }
+.statuscard .bglyph circle { fill: var(--stud); stroke: var(--stud-edge); stroke-width: 2; }
+.statuscard .txt { flex: 1; min-width: 0; }
+.statuscard .ttl { font-weight: 700; display: block; }
+.statuscard .st { display: block; font-size: .9rem; color: var(--ink-2); line-height: 1.3; }
+.statuscard .st.has { color: var(--good); font-weight: 700; }
+.chev { flex: none; width: 22px; height: 22px; fill: none; stroke: var(--ink-2); stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; transition: transform .15s; }
+[aria-expanded="true"] > .chev { transform: rotate(90deg); }
+@media (prefers-reduced-motion: reduce) { .chev { transition: none; } }
+.statuscard .body { padding: 14px 14px 16px; border-top: 1px solid var(--line); }
+
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .grow { flex: 1 1 160px; }
 
@@ -238,53 +256,60 @@ table.runs .btn { padding: 6px 10px; }
 <main>
   <section>
     <form class="panel stack" id="briefForm">
-      <div>
-        <label for="prompt">What should Nova build?</label>
-        <textarea id="prompt" placeholder="A small garden shed, about 150 pieces, in ordinary bricks and plates with a red door."></textarea>
+      <div class="seg" role="group" aria-label="Start from">
+        <button type="button" id="segNew" aria-pressed="true">New model</button>
+        <button type="button" id="segCont" aria-pressed="false">Continue a model</button>
       </div>
 
-      <details id="existing">
-        <summary>Or start from a model you already have</summary>
-        <div class="stack">
-          <div>
-            <label for="modelFile">Model in Nova's collection</label>
-            <select id="modelFile"><option value="">Loading…</option></select>
-          </div>
-          <div id="chatPick">
-            <label for="chatId">The chat that designed it</label>
-            <select id="chatId"><option value="latest">Most recent chat</option></select>
-          </div>
-          <p class="small muted" id="chatNote">Repairs go to the chat that designed the model, so the agent keeps its memory of the design.</p>
+      <div id="existing" class="stack" hidden>
+        <div>
+          <label for="modelFile">Model in Nova's collection</label>
+          <select id="modelFile"><option value="">Loading…</option></select>
         </div>
-      </details>
+        <div id="chatPick">
+          <label for="chatId">The chat that designed it</label>
+          <select id="chatId"><option value="latest">Most recent chat</option></select>
+        </div>
+        <p class="small muted" id="chatNote">Repairs go to the chat that designed the model, so the agent keeps its memory of the design.</p>
+      </div>
 
-      <details id="owned">
-        <summary>Bricks you already have</summary>
-        <div class="stack">
-          <p class="small muted">Anything here is left out of the wanted list, so you only buy what is missing.</p>
-          <div>
-            <label for="ownedText">Typed in</label>
-            <textarea id="ownedText" style="min-height:80px" placeholder="part, colour, quantity — one per line, e.g.&#10;3001, Red, 12&#10;3024, White, 30&#10;3005, , 8   (any colour)"></textarea>
-          </div>
-          <div>
-            <label>Your Rebrickable collection</label>
-            <div id="rbLoggedOut" class="stack">
-              <p class="small muted">Sign in once; brickpipe keeps only the token Rebrickable returns, in this browser. Needs the API key in Settings.</p>
-              <div class="row">
-                <input id="rbUser" type="text" class="grow" placeholder="Username or email" autocomplete="username">
-                <input id="rbPass" type="password" class="grow" placeholder="Password" autocomplete="current-password">
-                <button class="btn quiet small" id="rbLogin" type="button">Sign in</button>
+      <div>
+        <label for="prompt" id="promptLabel">What should Nova build?</label>
+        <textarea id="prompt" placeholder="A small garden shed, about 150 pieces, in ordinary bricks and plates with a red door."></textarea>
+        <p class="small muted" id="promptNote" hidden>The model is checked and repaired first; this goes to the agent as a change once that finishes.</p>
+      </div>
+
+      <div class="statuscard" id="owned">
+        <button type="button" id="ownedBtn" aria-expanded="false" aria-controls="ownedBody">
+          <svg class="bglyph" viewBox="0 0 40 28" aria-hidden="true"><rect x="2" y="10" width="36" height="16" rx="2.5"/><circle cx="8.5" cy="5.5" r="3"/><circle cx="16.8" cy="5.5" r="3"/><circle cx="25.1" cy="5.5" r="3"/><circle cx="33.4" cy="5.5" r="3"/></svg>
+          <span class="txt"><span class="ttl">Bricks you already have</span><span class="st" id="ownedStatus">Nothing entered — you'll shop for every piece</span></span>
+          <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
+        <div class="body" id="ownedBody" hidden>
+          <div class="stack">
+            <div>
+              <label for="ownedText">Typed in</label>
+              <textarea id="ownedText" style="min-height:80px" placeholder="part, colour, quantity — one per line, e.g.&#10;3001, Red, 12&#10;3024, White, 30&#10;3005, , 8   (any colour)"></textarea>
+            </div>
+            <div>
+              <label>Your Rebrickable collection</label>
+              <div id="rbLoggedOut" class="stack">
+                <p class="small muted">Sign in once; brickpipe keeps only the token Rebrickable returns, in this browser. Needs the API key in Settings.</p>
+                <div class="row">
+                  <input id="rbUser" type="text" class="grow" placeholder="Username or email" autocomplete="username">
+                  <input id="rbPass" type="password" class="grow" placeholder="Password" autocomplete="current-password">
+                  <button class="btn quiet small" id="rbLogin" type="button">Sign in</button>
+                </div>
+                <p class="err small" id="rbError"></p>
               </div>
-              <p class="err small" id="rbError"></p>
-            </div>
-            <div id="rbLoggedIn" class="row" hidden>
-              <span class="small">Connected: your sets and part lists will be subtracted.</span>
-              <button class="btn quiet small" id="rbLogout" type="button">Forget</button>
+              <div id="rbLoggedIn" class="row" hidden>
+                <span class="small">Connected: your sets and part lists will be subtracted.</span>
+                <button class="btn quiet small" id="rbLogout" type="button">Forget</button>
+              </div>
             </div>
           </div>
         </div>
-      </details>
-
+      </div>
 
       <div class="row">
         <button class="btn primary" id="runBtn" type="submit">Design and check</button>
@@ -605,7 +630,7 @@ table.runs .btn { padding: 6px 10px; }
     $('ldrawFields').hidden = hosted;
     if (hosted && serverKey) $('keyNote').textContent = 'The server already has a key, so this is optional: add your own only to sign in to your Rebrickable collection below under Build.';
     if (hosted) { $('novaUrl').value = s.nova_url; $('novaDb').value = s.nova_db; $('ldrawDir').value = s.ldraw_dir || ''; }
-    $('ownedText').value = store.get('owned_text', '');
+    $('ownedText').value = store.get('owned_text', ''); ownedStatus();
     for (const [id, key] of priceFields) { const v = store.get(key, ''); if (v) $(id).value = v; }
     rbRender();
     settingsHint();
@@ -759,24 +784,58 @@ table.runs .btn { padding: 6px 10px; }
     }
   }
   $('novaUrl').addEventListener('change', loadNova);
-  $('existing').addEventListener('toggle', () => {
-    $('runBtn').textContent = $('existing').open ? 'Check and repair' : 'Design and check';
-  });
+  // New model | Continue a model. The selects only count in Continue mode; going back to
+  // New model resets them so an earlier pick can never leak into a fresh design.
+  const NEW_PROMPT = { label: 'What should Nova build?', ph: $('prompt').placeholder };
+  const CONT_PROMPT = { label: 'What should change?', ph: 'Add a chimney and make the roof black.' };
+  let continuing = false;
+  function setMode(cont) {
+    continuing = cont;
+    $('segNew').setAttribute('aria-pressed', String(!cont));
+    $('segCont').setAttribute('aria-pressed', String(cont));
+    $('existing').hidden = !cont;
+    $('promptNote').hidden = !cont;
+    const t = cont ? CONT_PROMPT : NEW_PROMPT;
+    $('promptLabel').textContent = t.label;
+    $('prompt').placeholder = t.ph;
+    $('runBtn').textContent = cont ? 'Check and repair' : 'Design and check';
+    if (!cont) { $('modelFile').value = ''; syncChat(); }
+  }
+  $('segNew').onclick = () => setMode(false);
+  $('segCont').onclick = () => setMode(true);
+
+  // bricks you already have: accordion card with a live status line
+  function ownedStatus() {
+    const n = $('ownedText').value.split('\n').filter(l => l.trim()).length;
+    $('ownedStatus').textContent = n
+      ? `${n} line${n === 1 ? '' : 's'} entered — matching parts are left off the shopping list`
+      : "Nothing entered — you'll shop for every piece";
+    $('ownedStatus').classList.toggle('has', n > 0);
+  }
+  $('ownedText').addEventListener('input', ownedStatus);
+  $('ownedBtn').onclick = () => {
+    const open = $('ownedBtn').getAttribute('aria-expanded') !== 'true';
+    $('ownedBtn').setAttribute('aria-expanded', String(open));
+    $('ownedBody').hidden = !open;
+  };
+  ownedStatus();
 
   // start a run
+  var carriedChange = '';
   $('briefForm').addEventListener('submit', async e => {
     e.preventDefault();
     $('formError').textContent = '';
     const body = runSettings();
-    if ($('existing').open) {
+    if (continuing) {
       body.model_file = $('modelFile').value; body.chat_id = $('chatId').value || 'latest';
     } else {
       body.prompt = $('prompt').value.trim();
-      if (!body.prompt) { $('formError').textContent = 'Describe the model first, or open "start from a model you already have".'; return; }
+      if (!body.prompt) { $('formError').textContent = 'Describe the model first, or choose "Continue a model".'; return; }
     }
     $('runBtn').disabled = true;
     try {
       const run = await api('/api/runs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      if (continuing) { carriedChange = $('prompt').value.trim(); $('prompt').value = ''; }
       show(run); loadHistory();
     } catch (err) {
       $('formError').textContent = err.message;
@@ -967,6 +1026,7 @@ table.runs .btn { padding: 6px 10px; }
       <td class="small">${agentCell(r, run)}</td>
     </tr>`).join('') + pending.map(changeRow).join('');
     $('refineBox').hidden = !(['done', 'stopped'].includes(run.status) && run.chat_id);
+    if (!$('refineBox').hidden && carriedChange && !$('refineText').value) { $('refineText').value = carriedChange; carriedChange = ''; }
 
     const o = $('outcome');
     if (run.status === 'done' || run.status === 'stopped' || run.status === 'failed') {
