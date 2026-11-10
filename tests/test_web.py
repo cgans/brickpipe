@@ -650,3 +650,151 @@ class OwnKeyUseTests(unittest.TestCase):
 
 class UnlockedOwnKeyUseTests(OwnKeyUseTests):
     locked = False
+
+
+class OwnerRoutingTests(unittest.TestCase):
+    """Cloudflare Access's email header picks the owner's agent; the JSON body
+    never can. Everyone else keeps their own key or the default."""
+    HEADER = "Cf-Access-Authenticated-User-Email"
+    OWNER, OWNER_MODEL = "chris@example.com", "owner-agent"
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.fake = FakeNova()
+        cls.original_init = nova.Client.__init__
+
+        def patched(self, base_url=nova.DEFAULT_URL, opener=None, public_url=None):
+            cls.original_init(self, base_url, cls.fake, public_url)
+        nova.Client.__init__ = patched
+        cls.servers = {}
+        for name, kw in {"on": dict(owner_email=cls.OWNER, owner_model=cls.OWNER_MODEL),
+                         "email_only": dict(owner_email=cls.OWNER, owner_model=""),
+                         "model_only": dict(owner_email="", owner_model=cls.OWNER_MODEL),
+                         "locked": dict(owner_email=cls.OWNER, owner_model=cls.OWNER_MODEL, locked=True)}.items():
+            srv = web.make_server(0, Path(cls.tmp.name) / name, nova_url="http://ldraw-nova-app:8000", nova_db="", **kw)
+            threading.Thread(target=srv.serve_forever, daemon=True).start()
+            cls.servers[name] = (srv, f"http://127.0.0.1:{srv.server_address[1]}")
+
+    @classmethod
+    def tearDownClass(cls):
+        for srv, _ in cls.servers.values():
+            srv.shutdown()
+        nova.Client.__init__ = cls.original_init
+        cls.tmp.cleanup()
+
+    def post(self, server, path, body, email=None, header=None):
+        headers = {"Content-Type": "application/json"}
+        if email is not None:
+            headers[header or self.HEADER] = email
+        req = urllib.request.Request(self.servers[server][1] + path, data=json.dumps(body).encode(),
+                                     method="POST", headers=headers)
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return r.status, json.loads(r.read() or b"{}")
+        except urllib.error.HTTPError as err:
+            return err.code, json.loads(err.read() or b"{}")
+
+    def wait(self, server, run_id):  # one run at a time: the fake Nova is shared
+        for _ in range(100):
+            status, run = http("GET", f"{self.servers[server][1]}/api/runs/{run_id}")
+            if run["status"] in ("done", "failed", "stopped"):
+                return run
+            time.sleep(0.05)
+        self.fail("run did not finish")
+
+    def models_sent(self, since=0):
+        """The AI account named on every message sent to Nova (None: default)."""
+        sent = self.fake.messages[since:]
+        self.assertTrue(sent, "nothing reached Nova")
+        return {m.get("llm_model_id") for m in sent}
+
+    def run_model(self, server="on", email=None, header=None, extra=None, **body):
+        """Start a run; returns (finished run, the one model id Nova saw)."""
+        since = len(self.fake.messages)
+        status, run = self.post(server, "/api/runs", {"prompt": "a shed", **body, **(extra or {})}, email, header)
+        self.assertEqual(status, 202, run)
+        done = self.wait(server, run["id"])
+        seen = self.models_sent(since) | {self.fake.chats[done["chat_id"]]["llm_model_id"]}
+        self.assertEqual(len(seen), 1, seen)  # design chat and repair messages agree
+        return done, seen.pop()
+
+    def test_owner_gets_the_owner_agent_for_design_and_repair(self):
+        done, model = self.run_model(email=self.OWNER)
+        self.assertEqual(model, self.OWNER_MODEL)
+        self.assertEqual(done["request"]["llm_model_id"], self.OWNER_MODEL)
+        self.assertGreaterEqual(len(done["rounds"]), 2)  # at least one repair round was sent
+
+    def test_owner_overrides_the_browsers_own_model(self):
+        _, model = self.run_model(email=self.OWNER, llm_model_id="their-own-key")
+        self.assertEqual(model, self.OWNER_MODEL)
+
+    def test_header_match_ignores_case_and_spaces_and_header_name_case(self):
+        _, model = self.run_model(email="  Chris@EXAMPLE.com ")
+        self.assertEqual(model, self.OWNER_MODEL)
+        _, model = self.run_model(email=self.OWNER, header="cf-access-authenticated-user-email")
+        self.assertEqual(model, self.OWNER_MODEL)
+
+    def test_someone_else_keeps_their_own_model_or_the_default(self):
+        _, model = self.run_model(email="sister@example.com")
+        self.assertIsNone(model)
+        _, model = self.run_model(email="sister@example.com", llm_model_id="their-own-key")
+        self.assertEqual(model, "their-own-key")
+        _, model = self.run_model(email=None, llm_model_id="their-own-key")  # no Access header: local use
+        self.assertEqual(model, "their-own-key")
+        _, model = self.run_model()
+        self.assertIsNone(model)
+
+    def test_both_settings_are_needed(self):
+        for server in ("email_only", "model_only"):
+            _, model = self.run_model(server, email=self.OWNER)
+            self.assertIsNone(model, server)
+
+    def test_body_cannot_claim_to_be_the_owner(self):
+        for spoof in ({"email": self.OWNER}, {"owner_email": self.OWNER},
+                      {"Cf-Access-Authenticated-User-Email": self.OWNER}, {"headers": {self.HEADER: self.OWNER}}):
+            _, model = self.run_model(email="sister@example.com", extra=spoof)
+            self.assertIsNone(model, spoof)
+            _, model = self.run_model(extra=spoof)
+            self.assertIsNone(model, spoof)
+
+    def test_others_cannot_name_the_owner_agent(self):
+        _, model = self.run_model(email="sister@example.com", llm_model_id=self.OWNER_MODEL)
+        self.assertIsNone(model)
+        _, model = self.run_model("locked", email="x@example.com", llm_model_id=self.OWNER_MODEL)
+        self.assertIsNone(model)
+
+    def test_owner_on_a_locked_server_needs_no_token(self):
+        done, model = self.run_model("locked", email=self.OWNER, llm_model_id="x", llm_model_token="bad")
+        self.assertEqual(model, self.OWNER_MODEL)
+        self.assertNotIn("llm_model_token", json.dumps(done))
+
+    def act(self, run_id, verb, body, email):
+        since = len(self.fake.messages)
+        status, out = self.post("on", f"/api/runs/{run_id}/{verb}", body, email)
+        self.assertEqual(status, 202, out)
+        done = self.wait("on", out["id"] if verb == "rerun" else run_id)
+        return done, self.models_sent(since)
+
+    def test_change_and_rerun_follow_the_same_rules(self):
+        owner_run, _ = self.run_model(email=self.OWNER)
+        other_run, _ = self.run_model(email="sister@example.com", llm_model_id="their-own-key")
+        # the owner changing or rerunning someone else's run uses the owner agent
+        done, sent = self.act(other_run["id"], "refine", {"text": "taller"}, self.OWNER)
+        self.assertEqual(sent, {self.OWNER_MODEL})
+        self.assertEqual(done["request"]["llm_model_id"], self.OWNER_MODEL)
+        _, sent = self.act(other_run["id"], "rerun", {}, self.OWNER)
+        self.assertEqual(sent, {self.OWNER_MODEL})
+        # someone else changing or rerunning the owner's run must not inherit the owner agent
+        done, sent = self.act(owner_run["id"], "refine", {"text": "wider"}, "sister@example.com")
+        self.assertEqual(sent, {None})
+        self.assertEqual(done["request"]["llm_model_id"], "")
+        owner_run2, _ = self.run_model(email=self.OWNER)
+        for body in ({}, {"llm_model_id": self.OWNER_MODEL}):
+            _, sent = self.act(owner_run2["id"], "rerun", body, "sister@example.com")
+            self.assertEqual(sent, {None}, body)
+            _, sent = self.act(owner_run2["id"], "refine", {"text": "x", **body}, "sister@example.com")
+            self.assertEqual(sent, {None}, body)
+        # and with their own key they keep it
+        _, sent = self.act(owner_run2["id"], "rerun", {"llm_model_id": "their-own-key"}, "sister@example.com")
+        self.assertEqual(sent, {"their-own-key"})

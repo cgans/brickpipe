@@ -757,8 +757,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "Give a prompt, or pick a model or chat."}, 400)
             if self.settings.get("locked"):
                 body.pop("rebrickable_key", None) if self.settings.get("rebrickable_key") else None
-            if self.refuse_llm_model(body.get("llm_model_id"), body.pop("llm_model_token", None)):
+            if not self.route_llm_model(body) and self.refuse_llm_model(
+                    body.get("llm_model_id"), body.pop("llm_model_token", None)):
                 return
+            body.pop("llm_model_token", None)
             run = self.runner.start(body)
             return self.send_json(run.public(), 202)
         m = re.fullmatch(r"/api/runs/([\w-]+)/refine", path)
@@ -772,9 +774,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send_json({"error": "Say what you would like changed."}, 400)
             if self.settings.get("locked"):
                 body.pop("rebrickable_key", None) if self.settings.get("rebrickable_key") else None
-            if self.refuse_llm_model(body.get("llm_model_id", run.request.get("llm_model_id")),
-                                     body.pop("llm_model_token", None)):
+            if not self.route_llm_model(body, run.request.get("llm_model_id")) and self.refuse_llm_model(
+                    body.get("llm_model_id", run.request.get("llm_model_id")), body.pop("llm_model_token", None)):
                 return
+            body.pop("llm_model_token", None)
             try:
                 self.runner.refine(run, text, body)
             except ValueError as err:
@@ -790,9 +793,10 @@ class Handler(BaseHTTPRequestHandler):
                 body.pop("rebrickable_key", None) if self.settings.get("rebrickable_key") else None
             # A rerun keeps the old run's AI account unless the page sends one;
             # either way the token has to come with this request.
-            if self.refuse_llm_model(body.get("llm_model_id", run.request.get("llm_model_id")),
-                                     body.pop("llm_model_token", None)):
+            if not self.route_llm_model(body, run.request.get("llm_model_id")) and self.refuse_llm_model(
+                    body.get("llm_model_id", run.request.get("llm_model_id")), body.pop("llm_model_token", None)):
                 return
+            body.pop("llm_model_token", None)
             try:
                 new = self.runner.rerun(run, body)
             except ValueError as err:
@@ -837,6 +841,36 @@ class Handler(BaseHTTPRequestHandler):
 
         threading.Thread(target=work, daemon=True).start()
         return self.send_json(state, 202)
+
+    OWNER_HEADER = "Cf-Access-Authenticated-User-Email"
+
+    def is_owner(self) -> bool:
+        """True when Cloudflare Access says the owner is logged in. Decided
+        only from the request header (set by Cloudflare; the tunnel is the
+        sole ingress), never from the JSON body. Needs both owner settings;
+        without the header (local use) nobody is the owner."""
+        email, model = self.settings.get("owner_email"), self.settings.get("owner_model")
+        if not (email and model):
+            return False
+        sent = (self.headers.get(self.OWNER_HEADER) or "").strip().lower()
+        return bool(sent) and sent == email
+
+    def route_llm_model(self, body: dict, inherited=None) -> bool:
+        """Choose the AI account for a run, writing it into `body`. The owner
+        logged in gets the owner's agent, overriding whatever the browser
+        sent. For anyone else the owner's agent is never usable: a body or an
+        inherited rerun/change setting naming it is cleared, so they fall
+        back to the host's default. Returns True for the owner, whose agent
+        needs no own-key token."""
+        owner_model = self.settings.get("owner_model")
+        token = body.pop("llm_model_token", None)
+        if self.is_owner():
+            body["llm_model_id"] = owner_model
+            return True
+        if owner_model and body.get("llm_model_id", inherited) == owner_model:
+            body["llm_model_id"] = ""
+        body["llm_model_token"] = token  # the usual own-key check still applies
+        return False
 
     def refuse_llm_model(self, entry_id, token) -> bool:
         """On a locked server a run may use an own-key entry only with the
@@ -948,7 +982,8 @@ class Handler(BaseHTTPRequestHandler):
 def make_server(port: int = DEFAULT_PORT, runs_dir: Path | None = None,
                 nova_url: str = nova.DEFAULT_URL, nova_db: str | None = None,
                 host: str = "127.0.0.1", nova_public_url: str | None = None,
-                locked: bool = False, rebrickable_key: str | None = None) -> ThreadingHTTPServer:
+                locked: bool = False, rebrickable_key: str | None = None,
+                owner_email: str | None = None, owner_model: str | None = None) -> ThreadingHTTPServer:
     """`host` 0.0.0.0 makes the page reachable from other machines; combine it
     with `locked` so the server's Nova and library settings cannot be changed
     from a browser, and `nova_public_url` for the address browsers use to
@@ -966,6 +1001,9 @@ def make_server(port: int = DEFAULT_PORT, runs_dir: Path | None = None,
         "locked": bool(locked),
         "rebrickable_key": rebrickable_key or None,
         "host_name": os.environ.get("BRICKPIPE_HOST_NAME") or "",
+        # Server-side only; never sent to the page. See Handler.route_llm_model.
+        "owner_email": ((os.environ.get("BRICKPIPE_OWNER_EMAIL") if owner_email is None else owner_email) or "").strip().lower(),
+        "owner_model": ((os.environ.get("BRICKPIPE_OWNER_MODEL") if owner_model is None else owner_model) or "").strip(),
     }
     handler.runner = Runner(runs_dir or here / "runs", handler.settings)
     # In the runs folder so it lives in the /data volume of the Docker image.
