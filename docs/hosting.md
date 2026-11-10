@@ -40,6 +40,19 @@ flowchart LR
   its settings store on the server, and that person's runs are billed to
   it. "Forget" removes the entry again. Set `BRICKPIPE_HOST_NAME=Chris` so
   the toggle names you.
+- **Owner routing.** Optionally, set `BRICKPIPE_OWNER_EMAIL` (your Access
+  login email) and `BRICKPIPE_OWNER_MODEL` (the id of a Nova agent backed by
+  your own subscription; copy it from Nova's Settings > Agents once it
+  exists) in `deploy/.env`. When Cloudflare Access reports that email on a
+  request (the `Cf-Access-Authenticated-User-Email` header), new runs,
+  changes and reruns use that agent, whatever your browser has saved. Anyone
+  else is unchanged: their own key if they saved one, else the default agent;
+  and nobody else can run on the owner agent, even by rerunning your run.
+  Both variables are needed; with either empty, or no Access header (running
+  locally), the feature is off. brickpipe reads the email only from that
+  header, which is trustworthy because the tunnel is the only way in and
+  Cloudflare sets it on every request; never publish brickpipe's port
+  directly.
 
 ## Trust model
 

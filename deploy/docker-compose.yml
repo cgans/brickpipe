@@ -89,6 +89,8 @@ services:
       REBRICKABLE_API_KEY: ${REBRICKABLE_API_KEY:-}
       BRICKPIPE_HOST_NAME: ${BRICKPIPE_HOST_NAME:-}
       BRICKPIPE_FEATURES: ${BRICKPIPE_FEATURES:-}
+      BRICKPIPE_OWNER_EMAIL: ${BRICKPIPE_OWNER_EMAIL:-}
+      BRICKPIPE_OWNER_MODEL: ${BRICKPIPE_OWNER_MODEL:-}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/', timeout=5)"]
       interval: 30s
